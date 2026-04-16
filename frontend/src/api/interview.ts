@@ -82,4 +82,31 @@ export const interviewApi = {
   async completeInterview(sessionId: string): Promise<void> {
     return request.post<void>(`/api/interview/sessions/${sessionId}/complete`);
   },
+
+  /**
+   * 语音识别（ASR）
+   */
+  async transcribeAudio(sessionId: string, audioBlob: Blob): Promise<string> {
+    const formData = new FormData();
+    const ext = audioBlob.type.includes('mp4')
+      ? '.mp4'
+      : audioBlob.type.includes('webm')
+      ? '.webm'
+      : '.webm';
+    formData.append('audio', audioBlob, `recording${ext}`);
+    return request.upload<string>(`/api/interview/sessions/${sessionId}/asr`, formData);
+  },
+
+  /**
+   * 语音合成（TTS）
+   */
+  async synthesizeSpeech(sessionId: string, text: string): Promise<Blob> {
+    const instance = request.getInstance();
+    const response = await instance.post(
+      `/api/interview/sessions/${sessionId}/tts`,
+      { text },
+      { responseType: 'blob' }
+    );
+    return response.data as Blob;
+  },
 };
