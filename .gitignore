@@ -13,3 +13,11 @@ qodana.yaml
 
 app/src/main/resources/application-dev.yml
 /docs
+
+# Python voice service
+voice-service/.venv
+voice-service/__pycache__
+voice-service/models
+
+# Local design docs
+/design-system

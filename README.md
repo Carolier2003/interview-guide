@@ -201,14 +201,15 @@ interview-guide/
 
 环境要求：
 
-| 依赖          | 版本 | 必需 |
-| ------------- | ---- | ---- |
-| JDK           | 21+  | 是   |
-| Node.js       | 18+  | 是   |
-| PostgreSQL    | 14+  | 是   |
-| pgvector 扩展 | -    | 是   |
-| Redis         | 6+   | 是   |
-| S3 兼容存储   | -    | 是   |
+| 依赖          | 版本  | 必需 |
+| ------------- | ----- | ---- |
+| JDK           | 21+   | 是   |
+| Node.js       | 18+   | 是   |
+| PostgreSQL    | 14+   | 是   |
+| pgvector 扩展 | -     | 是   |
+| Redis         | 6+    | 是   |
+| S3 兼容存储   | -     | 是   |
+| Python        | 3.10+ | 否   |
 
 ### 1. 克隆项目
 
@@ -305,6 +306,45 @@ pnpm dev
 ```
 
 前端服务启动于 `http://localhost:5173`
+
+**语音服务（可选，用于模拟面试的语音输入和播报）：**
+
+语音服务基于 Python FastAPI 构建，使用 Sherpa-onnx 做语音识别（ASR），MeloTTS 做语音合成（TTS）。
+
+```bash
+cd voice-service
+
+# 创建虚拟环境（建议 Python 3.10+）
+python3 -m venv .venv
+source .venv/bin/activate
+
+# 安装依赖
+pip install -r requirements.txt
+
+# 首次启动需下载 TTS 依赖的 NLTK 数据
+python -c "import nltk; nltk.download('averaged_perceptron_tagger_eng')"
+
+# 启动服务
+uvicorn main:app --host 0.0.0.0 --port 8000
+```
+
+语音服务启动于 `http://localhost:8000`，需在 `app/src/main/resources/application.yml` 中配置 `voice.service.url` 指向该地址。
+
+**语音模型下载：**
+
+ASR 需要下载 sherpa-onnx 中文模型（以 paraformer 为例）：
+
+```bash
+cd voice-service
+mkdir -p models/sherpa-onnx
+
+# 下载并解压模型
+curl -L -o model.zip "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-paraformer-zh-small-2024-03-09.tar.bz2"
+tar -xjf model.zip -C models/sherpa-onnx --strip-components=1
+rm model.zip
+```
+
+下载完成后，确保 `models/sherpa-onnx/` 目录下包含 `model.onnx` 和 `tokens.txt` 两个文件。TTS 模型会在首次启动时自动下载。
 
 
 ## Docker 快速部署

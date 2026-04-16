@@ -23,7 +23,7 @@ spring:
 
   jpa:
     hibernate:
-      ddl-auto: create #首次启动用 create，表创建成功后，改回 update
+      ddl-auto: update #首次启动用 create，表创建成功后，改回 update
     show-sql: false
     properties:
       hibernate:
@@ -107,11 +107,17 @@ app:
   # RustFS (S3兼容) 存储配置
   storage:
     endpoint: ${APP_STORAGE_ENDPOINT:http://localhost:9000}
-    access-key: ${APP_STORAGE_ACCESS_KEY:wr45VXJZhCxc6FAWz0YR}
-    secret-key: ${APP_STORAGE_SECRET_KEY:GtKxV57WJkpw4CvASPBzTy2DYElLnRqh8dIXQa0m}
+    access-key: ${APP_STORAGE_ACCESS_KEY:rustfsadmin}
+    secret-key: ${APP_STORAGE_SECRET_KEY:rustfsadmin}
     bucket: ${APP_STORAGE_BUCKET:interview-guide}
     region: ${APP_STORAGE_REGION:us-east-1}
   
+  # 语音服务配置
+  voice:
+    service-url: ${VOICE_SERVICE_URL:http://localhost:8000}
+    asr-timeout: 30000
+    tts-timeout: 60000
+
   # CORS配置 - React前端
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:5174,http://localhost:80}
