@@ -4,6 +4,7 @@ import tempfile
 import wave
 from contextlib import asynccontextmanager
 
+import httpx
 import numpy as np
 from fastapi import FastAPI, File, UploadFile
 from fastapi.responses import JSONResponse, Response
@@ -15,11 +16,8 @@ asr_recognizer = None
 tts_model = None
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    global asr_recognizer, tts_model
-
-    # Load ASR
+def _load_local_asr():
+    global asr_recognizer
     try:
         import sherpa_onnx
 
@@ -50,7 +48,9 @@ async def lifespan(app: FastAPI):
         print(f"Failed to load ASR: {e}")
         asr_recognizer = None
 
-    # Load TTS
+
+def _load_local_tts():
+    global tts_model
     try:
         from melo.api import TTS
 
@@ -59,6 +59,17 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"Failed to load TTS: {e}")
         tts_model = None
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global asr_recognizer, tts_model
+
+    if settings.voice_provider == "local":
+        _load_local_asr()
+        _load_local_tts()
+    else:
+        print(f"Voice provider set to '{settings.voice_provider}', skipping local model loading")
 
     yield
 
@@ -71,15 +82,69 @@ app = FastAPI(lifespan=lifespan)
 
 @app.get("/health")
 def health():
-    return {
-        "status": "ok",
-        "asr_loaded": asr_recognizer is not None,
-        "tts_loaded": tts_model is not None,
-    }
+    if settings.voice_provider == "local":
+        return {
+            "status": "ok",
+            "provider": "local",
+            "asr_loaded": asr_recognizer is not None,
+            "tts_loaded": tts_model is not None,
+        }
+    else:
+        return {
+            "status": "ok",
+            "provider": settings.voice_provider,
+            "asr_loaded": bool(settings.siliconflow_api_key),
+            "tts_loaded": bool(settings.siliconflow_api_key),
+        }
+
+
+async def _asr_siliconflow(audio: UploadFile):
+    suffix = os.path.splitext(audio.filename or ".webm")[1] or ".webm"
+    content = await audio.read()
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        tmp.write(content)
+        tmp_path = tmp.name
+
+    try:
+        async with httpx.AsyncClient() as client:
+            with open(tmp_path, "rb") as f:
+                files = {
+                    "file": (
+                        audio.filename or "audio.webm",
+                        f,
+                        audio.content_type or "application/octet-stream",
+                    )
+                }
+                data = {"model": settings.siliconflow_asr_model}
+                resp = await client.post(
+                    f"{settings.siliconflow_base_url}/audio/transcriptions",
+                    headers={"Authorization": f"Bearer {settings.siliconflow_api_key}"},
+                    files=files,
+                    data=data,
+                    timeout=60.0,
+                )
+                resp.raise_for_status()
+                result = resp.json()
+
+        text = result.get("text", "")
+        return {"text": text}
+    except Exception as e:
+        print(f"SiliconFlow ASR failed: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"ASR inference failed: {str(e)}"},
+        )
+    finally:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
 
 
 @app.post("/asr")
 async def asr(audio: UploadFile = File(...)):
+    if settings.voice_provider == "siliconflow":
+        return await _asr_siliconflow(audio)
+
     if asr_recognizer is None:
         return JSONResponse(
             status_code=503,
@@ -192,8 +257,66 @@ def split_sentences_zh(text: str):
     return sentences if sentences else [text]
 
 
+async def _tts_siliconflow(text: str, speaker_id: int = 0):
+    headers = {
+        "Authorization": f"Bearer {settings.siliconflow_api_key}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": settings.siliconflow_tts_model,
+        "input": text,
+        "voice": settings.siliconflow_tts_voice,
+        "response_format": "mp3",
+        "stream": False,
+    }
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                f"{settings.siliconflow_base_url}/audio/speech",
+                headers=headers,
+                json=payload,
+                timeout=60.0,
+            )
+            resp.raise_for_status()
+            mp3_bytes = resp.content
+    except Exception as e:
+        print(f"SiliconFlow TTS request failed: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"TTS inference failed: {str(e)}"},
+        )
+
+    # mp3 -> wav
+    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
+        tmp.write(mp3_bytes)
+        mp3_path = tmp.name
+
+    wav_path = mp3_path + ".wav"
+    try:
+        seg = AudioSegment.from_mp3(mp3_path)
+        seg.export(wav_path, format="wav")
+        with open(wav_path, "rb") as f:
+            audio_bytes = f.read()
+    except Exception as e:
+        print(f"SiliconFlow TTS audio conversion failed: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"TTS audio conversion failed: {str(e)}"},
+        )
+    finally:
+        if os.path.exists(mp3_path):
+            os.unlink(mp3_path)
+        if os.path.exists(wav_path):
+            os.unlink(wav_path)
+
+    return Response(content=audio_bytes, media_type="audio/wav")
+
+
 @app.post("/tts")
 async def tts(text: str, speaker_id: int = 0):
+    if settings.voice_provider == "siliconflow":
+        return await _tts_siliconflow(text, speaker_id)
+
     if tts_model is None:
         return JSONResponse(
             status_code=503,
