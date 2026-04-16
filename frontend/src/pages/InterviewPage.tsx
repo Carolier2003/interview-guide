@@ -4,12 +4,13 @@ import {interviewApi} from '../api/interview';
 import ConfirmDialog from '../components/ConfirmDialog';
 import InterviewConfigPanel from '../components/InterviewConfigPanel';
 import InterviewChatPanel from '../components/InterviewChatPanel';
+import InterviewRealtimePanel, { type RealtimePhase } from '../components/InterviewRealtimePanel';
 import type {InterviewQuestion, InterviewSession} from '../types/interview';
 import { Mic } from 'lucide-react';
 import { useAudioRecorder } from '../hooks/useAudioRecorder';
 import { useTtsPlayer } from '../hooks/useTtsPlayer';
 
-type InterviewStage = 'config' | 'interview';
+type InterviewStage = 'config' | 'interview' | 'realtime';
 
 interface Message {
   type: 'interviewer' | 'user';
@@ -24,6 +25,9 @@ interface InterviewProps {
   onBack: () => void;
   onInterviewComplete: () => void;
 }
+
+const PREP_SECONDS = 5;
+const RECORDING_MAX_SECONDS = 90;
 
 export default function Interview({ resumeText, resumeId, onBack, onInterviewComplete }: InterviewProps) {
   const [stage, setStage] = useState<InterviewStage>('config');
@@ -42,6 +46,17 @@ export default function Interview({ resumeText, resumeId, onBack, onInterviewCom
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [playingMessageIndex, setPlayingMessageIndex] = useState<number | null>(null);
 
+  // Realtime mode states
+  const [realtimePhase, setRealtimePhase] = useState<RealtimePhase>('tts');
+  const [prepCountdown, setPrepCountdown] = useState(PREP_SECONDS);
+  const [recordingCountdown, setRecordingCountdown] = useState(RECORDING_MAX_SECONDS);
+  const [isPaused, setIsPaused] = useState(false);
+  const [realtimeError, setRealtimeError] = useState<string | null>(null);
+
+  const prepTimerRef = useRef<number | null>(null);
+  const recordingTimerRef = useRef<number | null>(null);
+  const realtimeTtsTriggeredRef = useRef<number>(-1);
+
   const {
     isRecording,
     audioBlob,
@@ -49,6 +64,7 @@ export default function Interview({ resumeText, resumeId, onBack, onInterviewCom
     startRecording,
     stopRecording,
     reset: resetRecorder,
+    error: recorderError,
     analyserNode,
   } = useAudioRecorder();
 
@@ -188,14 +204,62 @@ export default function Interview({ resumeText, resumeId, onBack, onInterviewCom
     }
   };
 
-    const handleSubmitAnswer = async () => {
-    if (!answer.trim() || !session || !currentQuestion) return;
+  const startRealtimeInterview = async () => {
+    setIsCreating(true);
+    setError('');
+    setRealtimeError(null);
+    try {
+      const newSession = await interviewApi.createSession({
+        resumeText,
+        questionCount,
+        resumeId,
+        forceCreate: forceCreateNew
+      });
+      setForceCreateNew(false);
+
+      const hasProgress = newSession.currentQuestionIndex > 0 ||
+        newSession.questions.some(q => q.userAnswer) ||
+        newSession.status === 'IN_PROGRESS';
+
+      if (hasProgress) {
+        // 恢复的会话暂用聊天模式（最简）
+        restoreSession(newSession);
+      } else {
+        setSession(newSession);
+        if (newSession.questions.length > 0) {
+          const firstQuestion = newSession.questions[0];
+          setCurrentQuestion(firstQuestion);
+          setMessages([{
+            type: 'interviewer',
+            content: firstQuestion.question,
+            category: firstQuestion.category,
+            questionIndex: 0
+          }]);
+        }
+        realtimeTtsTriggeredRef.current = -1;
+        setPrepCountdown(PREP_SECONDS);
+        setRecordingCountdown(RECORDING_MAX_SECONDS);
+        setRealtimePhase('tts');
+        setIsPaused(false);
+        setStage('realtime');
+      }
+    } catch (err) {
+      setError('创建面试失败，请重试');
+      console.error(err);
+      setForceCreateNew(false);
+    } finally {
+      setIsCreating(false);
+    }
+  };
+
+    const handleSubmitAnswer = async (answerText: string) => {
+    if (!session || !currentQuestion) return;
 
     setIsSubmitting(true);
 
     const userMessage: Message = {
       type: 'user',
-      content: answer
+      content: answerText
     };
     setMessages(prev => [...prev, userMessage]);
 
@@ -203,7 +267,7 @@ export default function Interview({ resumeText, resumeId, onBack, onInterviewCom
       const response = await interviewApi.submitAnswer({
         sessionId: session.sessionId,
         questionIndex: currentQuestion.questionIndex,
-        answer: answer.trim()
+        answer: answerText.trim()
       });
 
       setAnswer('');
@@ -216,16 +280,40 @@ export default function Interview({ resumeText, resumeId, onBack, onInterviewCom
           category: response.nextQuestion!.category,
           questionIndex: response.nextQuestion!.questionIndex
         }]);
+        if (stage === 'realtime') {
+          realtimeTtsTriggeredRef.current = -1;
+          setPrepCountdown(PREP_SECONDS);
+          setRecordingCountdown(RECORDING_MAX_SECONDS);
+          setRealtimePhase('tts');
+        }
       } else {
         // 面试已完成，评估将在后台进行，跳转到面试记录页
-        onInterviewComplete();
+        if (stage === 'realtime') {
+          setRealtimePhase('completed');
+          setTimeout(() => {
+            onInterviewComplete();
+          }, 1500);
+        } else {
+          onInterviewComplete();
+        }
       }
     } catch (err) {
-      setError('提交答案失败，请重试');
+      const msg = err instanceof Error ? err.message : '提交答案失败，请重试';
+      if (stage === 'realtime') {
+        setRealtimeError(msg + '，请重试或跳过本题');
+      } else {
+        setError(msg);
+      }
       console.error(err);
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  // 聊天模式的答案提交（需要非空）
+  const handleChatSubmitAnswer = async () => {
+    if (!answer.trim() || !session || !currentQuestion) return;
+    await handleSubmitAnswer(answer.trim());
   };
 
   const handleCompleteEarly = async () => {
@@ -250,11 +338,25 @@ export default function Interview({ resumeText, resumeId, onBack, onInterviewCom
     if (audioBlob && session) {
       const doTranscribe = async () => {
         setIsTranscribing(true);
+        if (stage === 'realtime') {
+          setRealtimePhase('transcribing');
+        }
         try {
           const text = await interviewApi.transcribeAudio(session.sessionId, audioBlob);
-          setAnswer(prev => (prev ? prev + ' ' + text : text));
+          if (stage === 'realtime') {
+            await handleSubmitAnswer(text.trim());
+          } else {
+            setAnswer(prev => (prev ? prev + ' ' + text : text));
+          }
         } catch (err) {
-          setError(err instanceof Error ? err.message : '语音识别失败');
+          const msg = err instanceof Error ? err.message : '语音识别失败';
+          if (stage === 'realtime') {
+            setRealtimeError(msg + '，请重试或跳过本题');
+            setRealtimePhase('tts'); // 允许重试
+            realtimeTtsTriggeredRef.current = -1;
+          } else {
+            setError(msg);
+          }
         } finally {
           setIsTranscribing(false);
           resetRecorder();
@@ -262,10 +364,12 @@ export default function Interview({ resumeText, resumeId, onBack, onInterviewCom
       };
       doTranscribe();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [audioBlob, session, resetRecorder]);
 
-  // 自动播放新题目 TTS
+  // 聊天模式：自动播放新题目 TTS
   useEffect(() => {
+    if (stage === 'realtime') return;
     const lastMsg = messages[messages.length - 1];
     if (lastMsg && lastMsg.type === 'interviewer') {
       const idx = messages.length - 1;
@@ -274,7 +378,87 @@ export default function Interview({ resumeText, resumeId, onBack, onInterviewCom
         handlePlayTts(lastMsg.content, idx, true);
       }
     }
-  }, [messages]);
+  }, [messages, stage]);
+
+  // 实时模式：自动播放当前题目 TTS
+  useEffect(() => {
+    if (stage !== 'realtime' || !currentQuestion || isPaused) return;
+    if (realtimePhase === 'tts' && realtimeTtsTriggeredRef.current !== currentQuestion.questionIndex && !isPlaying) {
+      realtimeTtsTriggeredRef.current = currentQuestion.questionIndex;
+      handlePlayTts(currentQuestion.question, -1, true);
+    }
+  }, [stage, currentQuestion, realtimePhase, isPlaying, isPaused]);
+
+  // TTS 结束检测：实时模式下从 tts -> prep
+  useEffect(() => {
+    if (stage === 'realtime' && realtimePhase === 'tts' && !isPlaying && realtimeTtsTriggeredRef.current === currentQuestion?.questionIndex) {
+      setRealtimePhase('prep');
+      setPrepCountdown(PREP_SECONDS);
+    }
+  }, [isPlaying, stage, realtimePhase, currentQuestion]);
+
+  // Prep 倒计时 -> 自动开始录音
+  useEffect(() => {
+    if (stage !== 'realtime' || realtimePhase !== 'prep' || isPaused) return;
+
+    if (prepCountdown <= 0) {
+      setRealtimePhase('recording');
+      setRecordingCountdown(RECORDING_MAX_SECONDS);
+      startRecording().catch(() => {
+        setRealtimeError('无法启动录音，请检查麦克风权限');
+      });
+      return;
+    }
+
+    prepTimerRef.current = window.setTimeout(() => {
+      setPrepCountdown(c => c - 1);
+    }, 1000);
+
+    return () => {
+      if (prepTimerRef.current) {
+        clearTimeout(prepTimerRef.current);
+      }
+    };
+  }, [stage, realtimePhase, prepCountdown, isPaused, startRecording]);
+
+  // Recording 最大时长倒计时 -> 自动停止录音
+  useEffect(() => {
+    if (stage !== 'realtime' || realtimePhase !== 'recording' || isPaused) return;
+
+    if (recordingCountdown <= 0) {
+      stopRecording();
+      return;
+    }
+
+    recordingTimerRef.current = window.setTimeout(() => {
+      setRecordingCountdown(c => c - 1);
+    }, 1000);
+
+    return () => {
+      if (recordingTimerRef.current) {
+        clearTimeout(recordingTimerRef.current);
+      }
+    };
+  }, [stage, realtimePhase, recordingCountdown, isPaused, stopRecording]);
+
+  // 录音器错误同步到实时模式错误
+  useEffect(() => {
+    if (stage === 'realtime' && recorderError) {
+      setRealtimeError(recorderError);
+    }
+  }, [recorderError, stage]);
+
+  // 浏览器切后台自动暂停
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (stage === 'realtime' && document.hidden && !isPaused && realtimePhase !== 'completed') {
+        handlePauseInterview();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => document.removeEventListener('visibilitychange', handleVisibility);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stage, isPaused, realtimePhase]);
 
   // 当TTS播放结束时同步状态
   useEffect(() => {
@@ -290,6 +474,36 @@ export default function Interview({ resumeText, resumeId, onBack, onInterviewCom
       ttsCacheRef.current.clear();
     };
   }, []);
+
+  // 实时模式控制
+  const handleSkipQuestion = async () => {
+    if (!session || !currentQuestion) return;
+    // 停止录音和TTS
+    stopRecording();
+    stop();
+    if (prepTimerRef.current) clearTimeout(prepTimerRef.current);
+    if (recordingTimerRef.current) clearTimeout(recordingTimerRef.current);
+    await handleSubmitAnswer('');
+  };
+
+  const handlePauseInterview = () => {
+    stop();
+    stopRecording();
+    if (prepTimerRef.current) clearTimeout(prepTimerRef.current);
+    if (recordingTimerRef.current) clearTimeout(recordingTimerRef.current);
+    setIsPaused(true);
+  };
+
+  const handleResumeInterview = () => {
+    setRealtimeError(null);
+    setIsPaused(false);
+    setRealtimePhase('tts');
+    realtimeTtsTriggeredRef.current = -1;
+  };
+
+  const handleExitInterview = () => {
+    setShowCompleteConfirm(true);
+  };
 
   // 语音播放（支持缓存复用）
   const handlePlayTts = async (text: string, messageIndex: number, autoPlay = false) => {
@@ -325,6 +539,7 @@ export default function Interview({ resumeText, resumeId, onBack, onInterviewCom
         questionCount={questionCount}
         onQuestionCountChange={setQuestionCount}
         onStart={startInterview}
+        onStartRealtime={startRealtimeInterview}
         isCreating={isCreating}
         checkingUnfinished={checkingUnfinished}
         unfinishedSession={unfinishedSession}
@@ -348,7 +563,7 @@ export default function Interview({ resumeText, resumeId, onBack, onInterviewCom
         messages={messages}
         answer={answer}
         onAnswerChange={setAnswer}
-        onSubmit={handleSubmitAnswer}
+        onSubmit={handleChatSubmitAnswer}
         onCompleteEarly={handleCompleteEarly}
         isSubmitting={isSubmitting}
         showCompleteConfirm={showCompleteConfirm}
@@ -364,9 +579,33 @@ export default function Interview({ resumeText, resumeId, onBack, onInterviewCom
     );
   };
 
+  const renderRealtime = () => {
+    if (!session || !currentQuestion) return null;
+
+    return (
+      <InterviewRealtimePanel
+        session={session}
+        currentQuestion={currentQuestion}
+        phase={realtimePhase}
+        prepCountdown={prepCountdown}
+        recordingCountdown={recordingCountdown}
+        recordingDuration={recordingDuration}
+        analyserNode={analyserNode}
+        onStopRecording={stopRecording}
+        onSkipQuestion={handleSkipQuestion}
+        onPauseInterview={handlePauseInterview}
+        onResumeInterview={handleResumeInterview}
+        onExitInterview={handleExitInterview}
+        isPaused={isPaused}
+        error={realtimeError}
+      />
+    );
+  };
+
   const stageSubtitles = {
     config: '配置您的面试参数',
-    interview: '认真回答每个问题，展示您的实力'
+    interview: '认真回答每个问题，展示您的实力',
+    realtime: '实时语音面试模式，模拟真实面试场景'
   };
 
     return (
@@ -407,6 +646,17 @@ export default function Interview({ resumeText, resumeId, onBack, onInterviewCom
             transition={{ duration: 0.3 }}
           >
             {renderInterview()}
+          </motion.div>
+        )}
+        {stage === 'realtime' && (
+          <motion.div
+            key="realtime"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.3 }}
+          >
+            {renderRealtime()}
           </motion.div>
         )}
       </AnimatePresence>

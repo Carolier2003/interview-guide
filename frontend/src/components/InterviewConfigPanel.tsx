@@ -1,10 +1,12 @@
 import { AnimatePresence, motion } from 'framer-motion';
+import { Mic } from 'lucide-react';
 import type { InterviewSession } from '../types/interview';
 
 interface InterviewConfigPanelProps {
   questionCount: number;
   onQuestionCountChange: (count: number) => void;
   onStart: () => void;
+  onStartRealtime?: () => void;
   isCreating: boolean;
   checkingUnfinished: boolean;
   unfinishedSession: InterviewSession | null;
@@ -19,6 +21,7 @@ export default function InterviewConfigPanel({
   questionCount,
   onQuestionCountChange,
   onStart,
+  onStartRealtime,
   isCreating,
   checkingUnfinished,
   unfinishedSession,
@@ -216,43 +219,57 @@ export default function InterviewConfigPanel({
           </AnimatePresence>
 
           {/* 操作按钮 */}
-          <div className="flex justify-end gap-3">
-            <motion.button
-              onClick={onBack}
-              className="rounded-lg border border-slate-200 bg-white px-5 py-2.5 text-sm font-semibold text-slate-600 transition-colors hover:border-slate-300 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:border-slate-500 dark:hover:bg-slate-700"
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-            >
-              返回
-            </motion.button>
-            <motion.button
-              onClick={onStart}
-              disabled={isCreating}
-              className="relative overflow-hidden rounded-lg bg-gradient-to-r from-primary-500 to-primary-600 px-6 py-2.5 text-sm font-semibold text-white shadow-md shadow-primary-500/20 transition-all hover:shadow-lg disabled:cursor-not-allowed disabled:opacity-60"
-              whileHover={{ scale: isCreating ? 1 : 1.02 }}
-              whileTap={{ scale: isCreating ? 1 : 0.98 }}
-            >
-              <span className="relative z-10 flex items-center gap-2">
-                {isCreating ? (
-                  <>
-                    <motion.span
-                      className="h-4 w-4 rounded-full border-2 border-white/30 border-t-white"
-                      animate={{ rotate: 360 }}
-                      transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
-                    />
-                    正在生成…
-                  </>
-                ) : (
-                  <>
-                    开始面试
-                    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <line x1="5" y1="12" x2="19" y2="12" />
-                      <polyline points="12 5 19 12 12 19" />
-                    </svg>
-                  </>
-                )}
-              </span>
-            </motion.button>
+          <div className="flex flex-col items-end gap-3">
+            <div className="flex justify-end gap-3 w-full">
+              <motion.button
+                onClick={onBack}
+                className="rounded-lg border border-slate-200 bg-white px-5 py-2.5 text-sm font-semibold text-slate-600 transition-colors hover:border-slate-300 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:border-slate-500 dark:hover:bg-slate-700"
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+              >
+                返回
+              </motion.button>
+              <motion.button
+                onClick={onStart}
+                disabled={isCreating}
+                className="relative overflow-hidden rounded-lg bg-gradient-to-r from-primary-500 to-primary-600 px-6 py-2.5 text-sm font-semibold text-white shadow-md shadow-primary-500/20 transition-all hover:shadow-lg disabled:cursor-not-allowed disabled:opacity-60"
+                whileHover={{ scale: isCreating ? 1 : 1.02 }}
+                whileTap={{ scale: isCreating ? 1 : 0.98 }}
+              >
+                <span className="relative z-10 flex items-center gap-2">
+                  {isCreating ? (
+                    <>
+                      <motion.span
+                        className="h-4 w-4 rounded-full border-2 border-white/30 border-t-white"
+                        animate={{ rotate: 360 }}
+                        transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+                      />
+                      正在生成…
+                    </>
+                  ) : (
+                    <>
+                      开始面试
+                      <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <line x1="5" y1="12" x2="19" y2="12" />
+                        <polyline points="12 5 19 12 12 19" />
+                      </svg>
+                    </>
+                  )}
+                </span>
+              </motion.button>
+            </div>
+            {onStartRealtime && (
+              <motion.button
+                onClick={onStartRealtime}
+                disabled={isCreating}
+                className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-600 transition-colors hover:border-slate-300 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:border-slate-500 dark:hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
+                whileHover={{ scale: isCreating ? 1 : 1.02 }}
+                whileTap={{ scale: isCreating ? 1 : 0.98 }}
+              >
+                <Mic className="h-4 w-4" />
+                实时语音面试
+              </motion.button>
+            )}
           </div>
         </div>
       </div>
