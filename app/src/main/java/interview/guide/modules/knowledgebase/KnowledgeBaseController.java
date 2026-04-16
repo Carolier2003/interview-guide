@@ -201,4 +201,12 @@ public class KnowledgeBaseController {
         return Result.success(null);
     }
 
+    /**
+     * 预览知识库文件内容
+     */
+    @GetMapping("/api/knowledgebase/{id}/preview")
+    public Result<String> previewKnowledgeBase(@PathVariable Long id) {
+        return Result.success(listService.previewKnowledgeBase(id));
+    }
+
 }

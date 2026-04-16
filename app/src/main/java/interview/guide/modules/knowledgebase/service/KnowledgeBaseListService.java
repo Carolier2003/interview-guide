@@ -32,6 +32,7 @@ public class KnowledgeBaseListService {
     private final RagChatMessageRepository ragChatMessageRepository;
     private final KnowledgeBaseMapper knowledgeBaseMapper;
     private final FileStorageService fileStorageService;
+    private final KnowledgeBaseParseService parseService;
 
     /**
      * 获取知识库列表（支持状态过滤和排序）
@@ -214,6 +215,36 @@ public class KnowledgeBaseListService {
     public KnowledgeBaseEntity getEntityForDownload(Long id) {
         return knowledgeBaseRepository.findById(id)
             .orElseThrow(() -> new BusinessException(ErrorCode.KNOWLEDGE_BASE_NOT_FOUND, "知识库不存在"));
+    }
+
+    // ========== 预览功能 ==========
+
+    /**
+     * 预览知识库文件内容（返回前5000字符的纯文本）
+     */
+    public String previewKnowledgeBase(Long id) {
+        KnowledgeBaseEntity entity = knowledgeBaseRepository.findById(id)
+            .orElseThrow(() -> new BusinessException(ErrorCode.KNOWLEDGE_BASE_NOT_FOUND, "知识库不存在"));
+
+        String storageKey = entity.getStorageKey();
+        if (storageKey == null || storageKey.isBlank()) {
+            throw new BusinessException(ErrorCode.STORAGE_DOWNLOAD_FAILED, "文件存储信息不存在");
+        }
+
+        log.info("预览知识库文件: id={}, filename={}", id, entity.getOriginalFilename());
+        byte[] fileBytes = fileStorageService.downloadFile(storageKey);
+        String content = parseService.parseContent(fileBytes, entity.getOriginalFilename());
+
+        if (content == null || content.isBlank()) {
+            return "文档内容为空或暂不支持预览该格式。";
+        }
+
+        // 限制返回长度，避免超大文档拖慢前端
+        int maxLength = 5000;
+        if (content.length() > maxLength) {
+            return content.substring(0, maxLength) + "\n\n...（内容已截断，仅展示前 " + maxLength + " 字符）";
+        }
+        return content;
     }
 }
 
