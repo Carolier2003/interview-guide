@@ -6,12 +6,14 @@ import interview.guide.modules.interview.model.*;
 import interview.guide.modules.interview.service.InterviewHistoryService;
 import interview.guide.modules.interview.service.InterviewPersistenceService;
 import interview.guide.modules.interview.service.InterviewSessionService;
+import interview.guide.modules.interview.service.VoiceServiceClient;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -29,6 +31,7 @@ public class InterviewController {
     private final InterviewSessionService sessionService;
     private final InterviewHistoryService historyService;
     private final InterviewPersistenceService persistenceService;
+    private final VoiceServiceClient voiceServiceClient;
     
     /**
      * 创建面试会话
@@ -156,5 +159,33 @@ public class InterviewController {
         log.info("删除面试会话: {}", sessionId);
         persistenceService.deleteSessionBySessionId(sessionId);
         return Result.success(null);
+    }
+
+    /**
+     * 语音识别（ASR）
+     */
+    @PostMapping(value = "/api/interview/sessions/{sessionId}/asr", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public Result<String> transcribeAudio(
+            @PathVariable String sessionId,
+            @RequestParam("audio") MultipartFile audioFile) {
+        log.info("ASR请求: 会话{}", sessionId);
+        String text = voiceServiceClient.transcribe(audioFile);
+        return Result.success(text);
+    }
+
+    /**
+     * 语音合成（TTS）
+     */
+    @PostMapping(value = "/api/interview/sessions/{sessionId}/tts")
+    public ResponseEntity<byte[]> synthesizeQuestion(
+            @PathVariable String sessionId,
+            @RequestBody Map<String, Object> body) {
+        log.info("TTS请求: 会话{}", sessionId);
+        String text = (String) body.get("text");
+        Integer speakerId = body.get("speakerId") instanceof Number ? ((Number) body.get("speakerId")).intValue() : 0;
+        byte[] audioBytes = voiceServiceClient.synthesize(text, speakerId);
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType("audio/wav"))
+                .body(audioBytes);
     }
 }

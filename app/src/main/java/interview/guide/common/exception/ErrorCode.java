@@ -61,8 +61,13 @@ public enum ErrorCode {
     AI_RATE_LIMIT_EXCEEDED(7005, "AI服务调用频率超限"),
 
     // ========== 限流模块错误 8xxx ==========
-    RATE_LIMIT_EXCEEDED(8001, "请求过于频繁，请稍后再试");
-    
+    RATE_LIMIT_EXCEEDED(8001, "请求过于频繁，请稍后再试"),
+
+    // ========== 语音模块错误 9xxx ==========
+    VOICE_SERVICE_UNAVAILABLE(9001, "语音服务暂时不可用，请稍后重试"),
+    VOICE_ASR_FAILED(9002, "语音识别失败，请重试"),
+    VOICE_TTS_FAILED(9003, "语音合成失败，请重试");
+
     private final Integer code;
     private final String message;
 }
