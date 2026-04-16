@@ -606,6 +606,7 @@ export default function Interview({ resumeText, resumeId, onBack, onInterviewCom
         onPauseInterview={handlePauseInterview}
         onResumeInterview={handleResumeInterview}
         onExitInterview={handleExitInterview}
+        onRetry={handleResumeInterview}
         isPaused={isPaused}
         error={realtimeError}
       />
