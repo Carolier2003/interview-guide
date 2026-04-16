@@ -8,6 +8,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.prompt.PromptTemplate;
 import org.springframework.ai.document.Document;
+import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
@@ -22,6 +23,9 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
 import java.util.regex.Pattern;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -34,7 +38,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 @Service
 public class KnowledgeBaseQueryService {
     private static final String NO_RESULT_RESPONSE = "抱歉，在选定的知识库中未检索到相关信息。请换一个更具体的关键词或补充上下文后再试。";
-    private static final Pattern SHORT_TOKEN_PATTERN = Pattern.compile("^[\\p{L}\\p{N}_-]{2,20}$");
+    // 仅匹配纯 ASCII 短标识符（如 "jvm" "redis" "spring"），不匹配含中文的问句
+    // 注意：\\p{L} 会匹配所有 Unicode 字母（含汉字），故改为 [a-zA-Z0-9] 避免误判
+    private static final Pattern SHORT_TOKEN_PATTERN = Pattern.compile("^[a-zA-Z0-9_.+-]{2,15}$");
     private static final int STREAM_PROBE_CHARS = 120;
 
     private final ChatClient chatClient;
@@ -51,6 +57,8 @@ public class KnowledgeBaseQueryService {
     private final int topkLong;
     private final double minScoreShort;
     private final double minScoreDefault;
+    private final String rewriteModel;
+    private final int rewriteTimeoutSeconds;
 
     public KnowledgeBaseQueryService(
             ChatClient.Builder chatClientBuilder,
@@ -66,7 +74,9 @@ public class KnowledgeBaseQueryService {
             @Value("${app.ai.rag.search.topk-medium:12}") int topkMedium,
             @Value("${app.ai.rag.search.topk-long:8}") int topkLong,
             @Value("${app.ai.rag.search.min-score-short:0.18}") double minScoreShort,
-            @Value("${app.ai.rag.search.min-score-default:0.28}") double minScoreDefault) throws IOException {
+            @Value("${app.ai.rag.search.min-score-default:0.28}") double minScoreDefault,
+            @Value("${app.ai.rag.rewrite.model:qwen-turbo}") String rewriteModel,
+            @Value("${app.ai.rag.rewrite.timeout-seconds:8}") int rewriteTimeoutSeconds) throws IOException {
         this.chatClient = chatClientBuilder.build();
         this.vectorService = vectorService;
         this.listService = listService;
@@ -81,6 +91,8 @@ public class KnowledgeBaseQueryService {
         this.topkLong = topkLong;
         this.minScoreShort = minScoreShort;
         this.minScoreDefault = minScoreDefault;
+        this.rewriteModel = rewriteModel;
+        this.rewriteTimeoutSeconds = rewriteTimeoutSeconds;
     }
 
     /**
@@ -290,16 +302,31 @@ public class KnowledgeBaseQueryService {
             Map<String, Object> variables = new HashMap<>();
             variables.put("question", question);
             String rewritePrompt = rewritePromptTemplate.render(variables);
-            String rewritten = chatClient.prompt()
-                .user(rewritePrompt)
-                .call()
-                .content();
+
+            // 用轻量模型做重写，比主力模型快 3-5 倍，重写任务不需要大模型
+            OpenAiChatOptions rewriteOptions = OpenAiChatOptions.builder()
+                .model(rewriteModel)  // 配置项: app.ai.rag.rewrite.model
+                .build();
+
+            // 加超时保护：若 REWRITE_TIMEOUT_SECONDS 内未返回，则回退到原问题
+            CompletableFuture<String> future = CompletableFuture.supplyAsync(() ->
+                chatClient.prompt()
+                    .user(rewritePrompt)
+                    .options(rewriteOptions)
+                    .call()
+                    .content()
+            );
+
+            String rewritten = future.get(rewriteTimeoutSeconds, TimeUnit.SECONDS);
             if (rewritten == null || rewritten.isBlank()) {
                 return question;
             }
             String normalized = rewritten.trim();
             log.info("Query rewrite: origin='{}', rewritten='{}'", question, normalized);
             return normalized;
+        } catch (TimeoutException e) {
+            log.warn("Query rewrite 超时（{}s），使用原问题继续检索: '{}'", rewriteTimeoutSeconds, question);
+            return question;
         } catch (Exception e) {
             log.warn("Query rewrite 失败，使用原问题继续检索: {}", e.getMessage());
             return question;

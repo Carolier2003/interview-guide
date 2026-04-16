@@ -66,14 +66,14 @@ spring:
     retry:
       max-attempts: 1  # 不重试，失败立即返回
       on-client-errors: false
-    # PostgreSQL Vector Store配置
+    # Qdrant Vector Store配置
     vectorstore:
-      pgvector:
-        index-type: HNSW
-        distance-type: COSINE_DISTANCE
-        dimensions: 1024  # text-embedding-v3实际生成的向量维度
-        initialize-schema: true # 开发环境设置为 true，方便快速启动。生产环境设置为 false，手动管理数据库 schema，避免意外变更。
-        remove-existing-vector-store-table: false  # 保留现有表和数据
+      qdrant:
+        host: ${QDRANT_HOST:localhost}
+        port: ${QDRANT_PORT:6334}          # gRPC端口，Spring AI通过此端口连接
+        api-key: ${QDRANT_API_KEY:}        # 本地部署可为空
+        collection-name: interview_guide_kb
+        initialize-schema: true            # 自动创建collection，开发环境设为true
 
 # Application custom configuration
 app:
@@ -85,6 +85,12 @@ app:
     rag:
       rewrite:
         enabled: ${APP_AI_RAG_REWRITE_ENABLED:true}
+        # Query Rewrite 使用轻量快速模型，避免用主力大模型拖慢整体响应
+        # 可选: qwen-turbo / qwen-turbo-latest / qwen-plus 等
+        model: ${APP_AI_RAG_REWRITE_MODEL:qwen-turbo}
+        # Rewrite 超时时间(秒)：超时后回退用原问题继续检索
+        # 建议: qwen-turbo 正常 1-3s，保留 5-15s 就足够
+        timeout-seconds: ${APP_AI_RAG_REWRITE_TIMEOUT:8}
       search:
         short-query-length: ${APP_AI_RAG_SHORT_QUERY_LENGTH:4}
         topk-short: ${APP_AI_RAG_TOPK_SHORT:20}

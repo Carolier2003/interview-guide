@@ -31,8 +31,8 @@ dependencies {
 
     // Spring AI 2.0 - OpenAI兼容模式 (阿里云DashScope)
     implementation "org.springframework.ai:spring-ai-starter-model-openai:${libs.versions.spring.ai.get()}"
-    // Spring AI 2.0 - PostgreSQL Vector Store (pgvector)
-    implementation "org.springframework.ai:spring-ai-starter-vector-store-pgvector:${libs.versions.spring.ai.get()}"
+    // Spring AI 2.0 - Qdrant Vector Store
+    implementation "org.springframework.ai:spring-ai-starter-vector-store-qdrant:${libs.versions.spring.ai.get()}"
 
     // Apache Tika for document parsing (PDF, DOCX, TXT)
     implementation libs.tika.core
