@@ -1,4 +1,5 @@
 import os
+import re
 import tempfile
 import wave
 from contextlib import asynccontextmanager
@@ -147,6 +148,30 @@ async def asr(audio: UploadFile = File(...)):
     return {"text": result}
 
 
+def clean_for_tts(text: str) -> str:
+    """
+    清洗文本，提升 MeloTTS 中文模型对混合内容的兼容性。
+    - 去掉 Markdown 引用、连续分隔线
+    - 统一换行为空格
+    - 把顿号替换为逗号
+    - 英文和数字前后加空格并转小写（MeloTTS 官方示例中小写英文支持更稳定）
+    """
+    # 去掉 Markdown 引用符号 >
+    text = re.sub(r'^>\s*', ' ', text, flags=re.MULTILINE)
+    # 去掉连续等号或横线组成的分隔线
+    text = re.sub(r'\n[=-]{3,}\n', ' ', text)
+    # 统一换行为空格
+    text = text.replace('\n', ' ')
+    # 顿号在英文术语前后容易丢音，替换为逗号
+    text = text.replace('、', '，')
+    # MeloTTS 中文模型对大写英文专有名词支持不佳，
+    # 给英文/数字前后加空格并统一转小写，防止整句被丢弃
+    text = re.sub(r'[a-zA-Z0-9]+', lambda m: f' {m.group().lower()} ', text)
+    # 去掉多余空格
+    text = re.sub(r'\s+', ' ', text)
+    return text.strip()
+
+
 @app.post("/tts")
 async def tts(text: str, speaker_id: int = 0):
     if tts_model is None:
@@ -155,13 +180,16 @@ async def tts(text: str, speaker_id: int = 0):
             content={"error": "TTS model not loaded"},
         )
 
+    cleaned_text = clean_for_tts(text)
+    print(f"[TTS] raw ({len(text)} chars) -> cleaned ({len(cleaned_text)} chars)")
+
     try:
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
             tmp_path = tmp.name
 
         # melotts signature: tts_to_file(text, speaker_id, output_path, ...)
         tts_model.tts_to_file(
-            text,
+            cleaned_text,
             speaker_id,
             tmp_path,
             sdp_ratio=0.2,
