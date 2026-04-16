@@ -154,7 +154,7 @@ def clean_for_tts(text: str) -> str:
     - 去掉 Markdown 引用、连续分隔线
     - 统一换行为空格
     - 把顿号替换为逗号
-    - 英文和数字前后加空格并转小写（MeloTTS 官方示例中小写英文支持更稳定）
+    - 英文转小写（MeloTTS 官方示例中小写英文支持更稳定）
     """
     # 去掉 Markdown 引用符号 >
     text = re.sub(r'^>\s*', ' ', text, flags=re.MULTILINE)
@@ -162,14 +162,34 @@ def clean_for_tts(text: str) -> str:
     text = re.sub(r'\n[=-]{3,}\n', ' ', text)
     # 统一换行为空格
     text = text.replace('\n', ' ')
-    # 顿号在英文术语前后容易丢音，替换为逗号
+    # 顿号替换为逗号
     text = text.replace('、', '，')
-    # MeloTTS 中文模型对大写英文专有名词支持不佳，
-    # 给英文/数字前后加空格并统一转小写，防止整句被丢弃
-    text = re.sub(r'[a-zA-Z0-9]+', lambda m: f' {m.group().lower()} ', text)
+    # 半角逗号转全角逗号（MeloTTS 中文前端对全角标点更稳定）
+    text = text.replace(',', '，')
+    # 英文转小写，但不添加额外空格，保持紧贴中文（参考官方示例）
+    text = re.sub(r'[a-zA-Z0-9]+', lambda m: m.group().lower(), text)
     # 去掉多余空格
     text = re.sub(r'\s+', ' ', text)
     return text.strip()
+
+
+def split_sentences_zh(text: str):
+    """按中文标点将文本切分为短句，过滤空句和纯标点句。"""
+    parts = re.split(r'([，。！？])', text)
+    sentences = []
+    current = ''
+    for part in parts:
+        current += part
+        if part in '，。！？':
+            stripped = current.strip()
+            # 保留有实质内容的句子（包含汉字、字母或数字）
+            if stripped and re.search(r'[\u4e00-\u9fffa-zA-Z0-9]', stripped):
+                sentences.append(stripped)
+            current = ''
+    last = current.strip()
+    if last and re.search(r'[\u4e00-\u9fffa-zA-Z0-9]', last):
+        sentences.append(last)
+    return sentences if sentences else [text]
 
 
 @app.post("/tts")
@@ -181,29 +201,50 @@ async def tts(text: str, speaker_id: int = 0):
         )
 
     cleaned_text = clean_for_tts(text)
-    print(f"[TTS] raw ({len(text)} chars) -> cleaned ({len(cleaned_text)} chars)")
+    sentences = split_sentences_zh(cleaned_text)
+    print(f"[TTS] raw ({len(text)} chars) -> cleaned ({len(cleaned_text)} chars), split={len(sentences)}")
 
-    try:
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-            tmp_path = tmp.name
+    combined = AudioSegment.empty()
+    success_count = 0
 
-        # melotts signature: tts_to_file(text, speaker_id, output_path, ...)
-        tts_model.tts_to_file(
-            cleaned_text,
-            speaker_id,
-            tmp_path,
-            sdp_ratio=0.2,
-            noise_scale=0.6,
-            noise_scale_w=0.8,
-        )
+    for idx, sent in enumerate(sentences):
+        print(f"[TTS] sentence {idx}: {sent}")
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+                tmp_path = tmp.name
 
-        with open(tmp_path, "rb") as f:
-            audio_bytes = f.read()
+            # melotts signature: tts_to_file(text, speaker_id, output_path, ...)
+            tts_model.tts_to_file(
+                sent,
+                speaker_id,
+                tmp_path,
+                sdp_ratio=0.2,
+                noise_scale=0.6,
+                noise_scale_w=0.8,
+            )
 
-        os.unlink(tmp_path)
-        return Response(content=audio_bytes, media_type="audio/wav")
-    except Exception as e:
+            seg = AudioSegment.from_wav(tmp_path)
+            combined += seg
+            success_count += 1
+            os.unlink(tmp_path)
+        except Exception as e:
+            print(f"[TTS] sentence {idx} failed: {e}")
+            # 失败时插入 0.2s 静音，避免音频跳变
+            combined += AudioSegment.silent(duration=200)
+
+    if success_count == 0:
         return JSONResponse(
             status_code=500,
-            content={"error": f"TTS inference failed: {str(e)}"},
+            content={"error": "TTS inference failed for all sentences"},
         )
+
+    # 导出合并后的音频
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+        out_path = tmp.name
+    combined.export(out_path, format="wav")
+
+    with open(out_path, "rb") as f:
+        audio_bytes = f.read()
+    os.unlink(out_path)
+
+    return Response(content=audio_bytes, media_type="audio/wav")
