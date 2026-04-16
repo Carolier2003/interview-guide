@@ -163,28 +163,32 @@ export default function InterviewHistoryPage({ onBack: _onBack, onViewInterview 
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
   const [deleteItem, setDeleteItem] = useState<InterviewWithResume | null>(null);
   const [exporting, setExporting] = useState<string | null>(null);
+  const [error, setError] = useState<string>('');
   const pollingRef = useRef<number | null>(null);
 
   const loadAllInterviews = useCallback(async (isPolling = false) => {
     if (!isPolling) {
       setLoading(true);
+      setError('');
     }
     try {
       const resumes = await historyApi.getResumes();
-      const allInterviews: InterviewWithResume[] = [];
 
-      for (const resume of resumes) {
-        const detail = await historyApi.getResumeDetail(resume.id);
-        if (detail.interviews && detail.interviews.length > 0) {
-          detail.interviews.forEach(interview => {
-            allInterviews.push({
+      const interviewArrays = await Promise.all(
+        resumes.map(async (resume) => {
+          const detail = await historyApi.getResumeDetail(resume.id);
+          if (detail.interviews && detail.interviews.length > 0) {
+            return detail.interviews.map(interview => ({
               ...interview,
               resumeId: resume.id,
               resumeFilename: resume.filename
-            });
-          });
-        }
-      }
+            }));
+          }
+          return [];
+        })
+      );
+
+      const allInterviews = interviewArrays.flat();
 
       // 按创建时间倒序排序
       allInterviews.sort((a, b) =>
@@ -203,6 +207,7 @@ export default function InterviewHistoryPage({ onBack: _onBack, onViewInterview 
       });
     } catch (err) {
       console.error('加载面试记录失败', err);
+      setError('加载面试记录失败，请稍后重试');
     } finally {
       if (!isPolling) {
         setLoading(false);
@@ -255,7 +260,7 @@ export default function InterviewHistoryPage({ onBack: _onBack, onViewInterview 
       await loadAllInterviews();
       setDeleteItem(null);
     } catch (err) {
-      alert(err instanceof Error ? err.message : '删除失败，请稍后重试');
+      setError(err instanceof Error ? err.message : '删除失败，请稍后重试');
     } finally {
       setDeletingSessionId(null);
     }
@@ -275,7 +280,7 @@ export default function InterviewHistoryPage({ onBack: _onBack, onViewInterview 
       document.body.removeChild(a);
       window.URL.revokeObjectURL(url);
     } catch (err) {
-      alert('导出失败，请重试');
+      setError('导出失败，请重试');
     } finally {
       setExporting(null);
     }
@@ -328,6 +333,27 @@ export default function InterviewHistoryPage({ onBack: _onBack, onViewInterview 
         </motion.div>
       </div>
 
+      {/* 错误提示 */}
+      <AnimatePresence>
+        {error && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="mb-6 rounded-xl border border-red-200 bg-red-50/60 p-4 text-sm text-red-600 dark:border-red-800 dark:bg-red-900/20 dark:text-red-400 flex items-center gap-2"
+          >
+            <AlertCircle className="w-5 h-5 flex-shrink-0" />
+            {error}
+            <button
+              onClick={() => setError('')}
+              className="ml-auto text-red-500 hover:text-red-600"
+            >
+              知道了
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* 统计卡片 */}
       {stats && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
@@ -348,7 +374,7 @@ export default function InterviewHistoryPage({ onBack: _onBack, onViewInterview 
             label="平均分数"
             value={stats.averageScore}
             suffix="分"
-            color="bg-indigo-500"
+            color="bg-primary-500"
           />
         </div>
       )}
@@ -369,7 +395,15 @@ export default function InterviewHistoryPage({ onBack: _onBack, onViewInterview 
         >
             <Users className="w-16 h-16 text-slate-300 dark:text-slate-600 mx-auto mb-4"/>
             <h3 className="text-xl font-semibold text-slate-700 dark:text-slate-300 mb-2">暂无面试记录</h3>
-            <p className="text-slate-500 dark:text-slate-400">开始一次模拟面试后，记录将显示在这里</p>
+            <p className="text-slate-500 dark:text-slate-400 mb-6">上传简历并开始模拟面试，记录将显示在这里</p>
+            <motion.button
+              onClick={_onBack}
+              className="px-6 py-3 bg-gradient-to-r from-primary-500 to-primary-600 text-white rounded-xl font-medium shadow-lg shadow-primary-500/30"
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+            >
+              上传简历
+            </motion.button>
         </motion.div>
       )}
 

@@ -216,7 +216,7 @@ export default function HistoryList({ onSelectResume }: HistoryListProps) {
       await loadResumes();
       setDeleteItem(null);
     } catch (err) {
-      alert(err instanceof Error ? err.message : '删除失败，请稍后重试');
+      console.error(err instanceof Error ? err.message : '删除失败，请稍后重试');
     } finally {
       setDeletingId(null);
     }
@@ -282,7 +282,7 @@ export default function HistoryList({ onSelectResume }: HistoryListProps) {
             icon={MessageSquare}
             label="面试总数"
             value={stats.totalInterviewCount}
-            color="bg-indigo-500"
+            color="bg-primary-500"
           />
           <StatCard
             icon={Eye}

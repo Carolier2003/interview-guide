@@ -56,7 +56,7 @@ export default function Layout() {
 
   return (
       <div
-          className="flex min-h-screen bg-gradient-to-br from-slate-50 to-indigo-50 dark:from-slate-900 dark:to-slate-800">
+          className="flex min-h-screen bg-gradient-to-br from-slate-50 to-teal-50 dark:from-slate-900 dark:to-slate-800">
       {/* 左侧边栏 */}
           <aside
               className="w-64 bg-white dark:bg-slate-900 border-r border-slate-100 dark:border-slate-700 fixed h-screen left-0 top-0 z-50 flex flex-col">
@@ -150,11 +150,11 @@ export default function Layout() {
         </nav>
 
         {/* 底部信息 */}
-              <div className="p-4 border-t border-slate-100 dark:border-slate-700">
+              <div className="px-4 pb-4 pt-6">
                   <div
-                      className="px-3 py-2 bg-gradient-to-r from-primary-50 to-indigo-50 dark:from-primary-900/30 dark:to-slate-800 rounded-xl">
+                      className="px-3 py-2 bg-gradient-to-r from-primary-50 to-teal-50 dark:from-primary-900/30 dark:to-slate-800 rounded-xl">
                       <p className="text-xs text-primary-600 dark:text-primary-400 font-medium">AI 面试助手 v1.0</p>
-                      <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">Powered by AI</p>
+                      <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">Powered by Carroll</p>
           </div>
         </div>
       </aside>

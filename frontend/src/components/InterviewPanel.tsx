@@ -1,12 +1,12 @@
 import {useMemo, useState} from 'react';
-import {motion} from 'framer-motion';
+import {AnimatePresence, motion} from 'framer-motion';
 import {CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis} from 'recharts';
 import {formatDateOnly} from '../utils/date';
 import {getScoreColor} from '../utils/score';
 import type {InterviewItem} from '../api/history';
 import {historyApi} from '../api/history';
 import ConfirmDialog from './ConfirmDialog';
-import {Calendar, ChevronRight, Download, MessageSquare, Mic, Trash2, TrendingUp} from 'lucide-react';
+import {AlertCircle, Calendar, ChevronRight, Download, MessageSquare, Mic, Trash2, TrendingUp} from 'lucide-react';
 
 interface InterviewPanelProps {
   interviews: InterviewItem[];
@@ -32,6 +32,7 @@ export default function InterviewPanel({
 }: InterviewPanelProps) {
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<{ sessionId: string } | null>(null);
+  const [error, setError] = useState<string>('');
 
   const handleDeleteClick = (sessionId: string, e: React.MouseEvent) => {
     e.stopPropagation(); // 阻止触发卡片点击事件
@@ -48,7 +49,7 @@ export default function InterviewPanel({
       onDeleteInterview(sessionId);
       setDeleteConfirm(null);
     } catch (err) {
-      alert(err instanceof Error ? err.message : '删除失败，请稍后重试');
+      setError(err instanceof Error ? err.message : '删除失败，请稍后重试');
     } finally {
       setDeletingSessionId(null);
     }
@@ -68,7 +69,26 @@ export default function InterviewPanel({
 
   if (interviews.length === 0) {
     return (
-        <div className="bg-white dark:bg-slate-800 rounded-2xl p-12 text-center">
+        <div className="bg-white dark:bg-slate-800 rounded-2xl p-12 text-center relative">
+          <AnimatePresence>
+            {error && (
+              <motion.div
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                className="mb-6 rounded-xl border border-red-200 bg-red-50/60 p-4 text-sm text-red-600 dark:border-red-800 dark:bg-red-900/20 dark:text-red-400 flex items-center gap-2"
+              >
+                <AlertCircle className="w-5 h-5 flex-shrink-0" />
+                {error}
+                <button
+                  onClick={() => setError('')}
+                  className="ml-auto text-red-500 hover:text-red-600 font-medium"
+                >
+                  知道了
+                </button>
+              </motion.div>
+            )}
+          </AnimatePresence>
           <div
               className="w-16 h-16 mx-auto mb-6 bg-slate-100 dark:bg-slate-700 rounded-full flex items-center justify-center">
           <Mic className="w-8 h-8 text-slate-400" />
@@ -89,6 +109,25 @@ export default function InterviewPanel({
 
   return (
     <div className="space-y-6">
+      <AnimatePresence>
+        {error && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="rounded-xl border border-red-200 bg-red-50/60 p-4 text-sm text-red-600 dark:border-red-800 dark:bg-red-900/20 dark:text-red-400 flex items-center gap-2"
+          >
+            <AlertCircle className="w-5 h-5 flex-shrink-0" />
+            {error}
+            <button
+              onClick={() => setError('')}
+              className="ml-auto text-red-500 hover:text-red-600 font-medium"
+            >
+              知道了
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
       {/* 面试表现趋势图 */}
       {chartData.length > 0 && (
           <motion.div
@@ -132,10 +171,10 @@ export default function InterviewPanel({
                 <Line
                     type="monotone"
                     dataKey="score"
-                    stroke="#6366f1"
+                    stroke="#14b8a6"
                   strokeWidth={3}
-                  dot={{ fill: '#6366f1', strokeWidth: 2, r: 5 }}
-                  activeDot={{ r: 8, fill: '#6366f1' }}
+                  dot={{ fill: '#14b8a6', strokeWidth: 2, r: 5 }}
+                  activeDot={{ r: 8, fill: '#14b8a6' }}
                 />
               </LineChart>
             </ResponsiveContainer>

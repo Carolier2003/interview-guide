@@ -6,7 +6,7 @@ import AnalysisPanel from '../components/AnalysisPanel';
 import InterviewPanel from '../components/InterviewPanel';
 import InterviewDetailPanel from '../components/InterviewDetailPanel';
 import {formatDateOnly} from '../utils/date';
-import {CheckSquare, ChevronLeft, Clock, Download, MessageSquare, Mic} from 'lucide-react';
+import {AlertCircle, CheckSquare, ChevronLeft, Clock, Download, MessageSquare, Mic} from 'lucide-react';
 
 interface ResumeDetailPageProps {
   resumeId: number;
@@ -28,6 +28,7 @@ export default function ResumeDetailPage({ resumeId, onBack, onStartInterview }:
   const [selectedInterview, setSelectedInterview] = useState<InterviewDetail | null>(null);
   const [loadingInterview, setLoadingInterview] = useState(false);
   const [reanalyzing, setReanalyzing] = useState(false);
+  const [error, setError] = useState('');
 
   // 静默加载数据（用于轮询）
   const loadResumeDetailSilent = useCallback(async () => {
@@ -122,7 +123,7 @@ export default function ResumeDetailPage({ resumeId, onBack, onStartInterview }:
       document.body.removeChild(a);
       window.URL.revokeObjectURL(url);
     } catch (err) {
-      alert('导出失败，请重试');
+      setError('导出失败，请重试');
     } finally {
       setExporting(null);
     }
@@ -141,7 +142,7 @@ export default function ResumeDetailPage({ resumeId, onBack, onStartInterview }:
       document.body.removeChild(a);
       window.URL.revokeObjectURL(url);
     } catch (err) {
-      alert('导出失败，请重试');
+      setError('导出失败，请重试');
     } finally {
       setExporting(null);
     }
@@ -154,7 +155,7 @@ export default function ResumeDetailPage({ resumeId, onBack, onStartInterview }:
       setSelectedInterview(detail);
       setDetailView('interviewDetail');
     } catch (err) {
-      alert('加载面试详情失败');
+      setError('加载面试详情失败');
     } finally {
       setLoadingInterview(false);
     }
@@ -282,6 +283,27 @@ export default function ResumeDetailPage({ resumeId, onBack, onStartInterview }:
           )}
         </div>
       </div>
+
+      {/* 错误提示 */}
+      <AnimatePresence>
+        {error && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="mb-6 rounded-xl border border-red-200 bg-red-50/60 p-4 text-sm text-red-600 dark:border-red-800 dark:bg-red-900/20 dark:text-red-400 flex items-center gap-2"
+          >
+            <AlertCircle className="w-5 h-5 flex-shrink-0" />
+            {error}
+            <button
+              onClick={() => setError('')}
+              className="ml-auto text-red-500 hover:text-red-600 font-medium"
+            >
+              知道了
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* 标签页切换 - 仅在非面试详情时显示 */}
       {detailView !== 'interviewDetail' && (

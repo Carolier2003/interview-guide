@@ -4,6 +4,7 @@ import {historyApi, ResumeListItem} from '../api/history';
 import DeleteConfirmDialog from '../components/DeleteConfirmDialog';
 import {formatDateOnly} from '../utils/date';
 import {getScoreProgressColor} from '../utils/score';
+import { AlertCircle, FileText } from 'lucide-react';
 
 interface HistoryListProps {
   onSelectResume: (id: number) => void;
@@ -15,6 +16,7 @@ export default function HistoryList({ onSelectResume }: HistoryListProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: number; filename: string } | null>(null);
+  const [error, setError] = useState<string>('');
 
   useEffect(() => {
     loadResumes();
@@ -50,7 +52,7 @@ export default function HistoryList({ onSelectResume }: HistoryListProps) {
       await loadResumes();
       setDeleteConfirm(null);
     } catch (err) {
-      alert(err instanceof Error ? err.message : '删除失败，请稍后重试');
+      setError(err instanceof Error ? err.message : '删除失败，请稍后重试');
     } finally {
       setDeletingId(null);
     }
@@ -105,6 +107,27 @@ export default function HistoryList({ onSelectResume }: HistoryListProps) {
         </motion.div>
       </div>
 
+      {/* 错误提示 */}
+      <AnimatePresence>
+        {error && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="mb-6 rounded-xl border border-red-200 bg-red-50/60 p-4 text-sm text-red-600 dark:border-red-800 dark:bg-red-900/20 dark:text-red-400 flex items-center gap-2"
+          >
+            <AlertCircle className="w-5 h-5 flex-shrink-0" />
+            {error}
+            <button
+              onClick={() => setError('')}
+              className="ml-auto text-red-500 hover:text-red-600 font-medium"
+            >
+              知道了
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* 加载状态 */}
       {loading && (
         <div className="text-center py-20">
@@ -120,13 +143,15 @@ export default function HistoryList({ onSelectResume }: HistoryListProps) {
       {/* 空状态 */}
       {!loading && filteredResumes.length === 0 && (
           <motion.div
-              className="text-center py-20 bg-white dark:bg-slate-800 rounded-2xl"
+              className="text-center py-20 bg-white dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-700 shadow-sm"
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
         >
-          <div className="text-6xl mb-6">📄</div>
+          <div className="w-16 h-16 mx-auto mb-6 bg-slate-100 dark:bg-slate-700 rounded-full flex items-center justify-center">
+            <FileText className="w-8 h-8 text-slate-400" />
+          </div>
               <h3 className="text-xl font-semibold text-slate-700 dark:text-slate-300 mb-2">暂无简历记录</h3>
-              <p className="text-slate-500 dark:text-slate-400">上传简历开始您的第一次 AI 面试分析</p>
+              <p className="text-slate-500 dark:text-slate-400 mb-6">上传简历开始您的第一次 AI 面试分析</p>
         </motion.div>
       )}
 
