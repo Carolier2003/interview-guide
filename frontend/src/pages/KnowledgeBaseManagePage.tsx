@@ -13,6 +13,7 @@ import {
   Eye,
   FileText,
   FolderOpen,
+  GitGraph,
   HardDrive,
   Loader2,
   MessageSquare,
@@ -149,6 +150,10 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
   const [previewContent, setPreviewContent] = useState('');
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewPdfUrl, setPreviewPdfUrl] = useState<string | null>(null);
+
+  const [showQdrantGraph, setShowQdrantGraph] = useState(false);
+  // 使用 nginx 反代端口 6335（6333 直连会被 X-Frame-Options 拦截）
+  const QDRANT_DASHBOARD_URL = `${window.location.protocol}//${window.location.hostname}:6335/dashboard#/collections/interview_guide_kb`;
 
   const loadDataSilent = useCallback(async () => {
     try {
@@ -344,6 +349,15 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
           >
             <Upload className="w-4 h-4" />
             上传知识库
+          </motion.button>
+          <motion.button
+            onClick={() => setShowQdrantGraph(true)}
+            className="flex items-center gap-2 rounded-xl border border-violet-200 bg-violet-50 px-4 py-2.5 text-sm font-semibold text-violet-600 transition-colors hover:bg-violet-100 dark:border-violet-800 dark:bg-violet-950/30 dark:text-violet-400 dark:hover:bg-violet-950/50"
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+          >
+            <GitGraph className="w-4 h-4" />
+            向量图谱
           </motion.button>
           <motion.button
             onClick={onChat}
@@ -662,6 +676,64 @@ export default function KnowledgeBaseManagePage({ onUpload, onChat }: KnowledgeB
                   )}
                 </div>
               </motion.div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+      {/* Qdrant 向量图谱 Modal */}
+      <AnimatePresence>
+        {showQdrantGraph && (
+          <>
+            <motion.div
+              className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowQdrantGraph(false)}
+            />
+            <motion.div
+              className="fixed inset-4 z-50 flex flex-col overflow-hidden rounded-2xl border border-violet-200 dark:border-violet-900 bg-white dark:bg-slate-900 shadow-2xl"
+              initial={{ opacity: 0, scale: 0.96, y: 16 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.96, y: 16 }}
+              transition={{ duration: 0.25 }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* 顶栏 */}
+              <div className="flex items-center justify-between gap-4 px-5 py-3.5 border-b border-violet-100 dark:border-violet-900/60 bg-violet-50 dark:bg-violet-950/30 flex-shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-violet-500/10">
+                    <GitGraph className="w-4 h-4 text-violet-600 dark:text-violet-400" />
+                  </div>
+                  <div>
+                    <p className="font-semibold text-slate-800 dark:text-white text-sm">Qdrant 向量图谱</p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">collection: interview_guide_kb · 由 Qdrant Dashboard 提供</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <a
+                    href={QDRANT_DASHBOARD_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-1.5 rounded-lg border border-violet-200 dark:border-violet-800 px-3 py-1.5 text-xs font-medium text-violet-600 dark:text-violet-400 hover:bg-violet-100 dark:hover:bg-violet-900/30 transition-colors"
+                  >
+                    新标签页打开
+                  </a>
+                  <button
+                    onClick={() => setShowQdrantGraph(false)}
+                    className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+              {/* iframe */}
+              <iframe
+                src={QDRANT_DASHBOARD_URL}
+                title="Qdrant 向量图谱"
+                className="flex-1 border-0 w-full"
+                allow="same-origin"
+              />
             </motion.div>
           </>
         )}

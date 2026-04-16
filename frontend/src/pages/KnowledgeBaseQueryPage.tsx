@@ -243,9 +243,15 @@ export default function KnowledgeBaseQueryPage({ onBack, onUpload }: KnowledgeBa
     if (!text) return '';
     return text
       .replace(/\\n/g, '\n')
+      // 标题：# 后无空格时补空格（如 ##标题 → ## 标题）
       .replace(/^(#{1,6})([^\s#\n])/gm, '$1 $2')
+      // 有序列表：数字后无空格时补空格（如 1.text → 1. text）
       .replace(/^(\s*)(\d+)\.([^\s\n])/gm, '$1$2. $3')
-      .replace(/^(\s*[-*])([^\s\n-])/gm, '$1 $2')
+      // 无序列表（- 开头）：无空格时补空格（如 -text → - text）
+      .replace(/^(\s*-)([^\s\n-])/gm, '$1 $2')
+      // 无序列表（* 开头）：无空格时补空格，但下一字符为 * 时跳过（避免破坏 **bold**）
+      .replace(/^(\s*\*)([^\s\n*])/gm, '$1 $2')
+      // 合并多余空行
       .replace(/\n{3,}/g, '\n\n');
   };
 
