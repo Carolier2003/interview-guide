@@ -85,6 +85,13 @@ export const knowledgeBaseApi = {
         return response.data;
     },
 
+    /**
+     * 预览知识库文件内容
+     */
+    async previewKnowledgeBase(id: number): Promise<string> {
+        return request.get<string>(`/api/knowledgebase/${id}/preview`);
+    },
+
   /**
    * 获取所有知识库列表
    */
