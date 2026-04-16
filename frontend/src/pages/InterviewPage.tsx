@@ -56,6 +56,7 @@ export default function Interview({ resumeText, resumeId, onBack, onInterviewCom
   const prepTimerRef = useRef<number | null>(null);
   const recordingTimerRef = useRef<number | null>(null);
   const realtimeTtsTriggeredRef = useRef<number>(-1);
+  const realtimeTtsStartedRef = useRef<boolean>(false);
 
   const {
     isRecording,
@@ -385,13 +386,22 @@ export default function Interview({ resumeText, resumeId, onBack, onInterviewCom
     if (stage !== 'realtime' || !currentQuestion || isPaused) return;
     if (realtimePhase === 'tts' && realtimeTtsTriggeredRef.current !== currentQuestion.questionIndex && !isPlaying) {
       realtimeTtsTriggeredRef.current = currentQuestion.questionIndex;
+      realtimeTtsStartedRef.current = false;
       handlePlayTts(currentQuestion.question, -1, true);
     }
   }, [stage, currentQuestion, realtimePhase, isPlaying, isPaused]);
 
+  // 标记 TTS 真正开始播放
+  useEffect(() => {
+    if (stage === 'realtime' && realtimePhase === 'tts' && isPlaying && realtimeTtsTriggeredRef.current === currentQuestion?.questionIndex) {
+      realtimeTtsStartedRef.current = true;
+    }
+  }, [isPlaying, stage, realtimePhase, currentQuestion]);
+
   // TTS 结束检测：实时模式下从 tts -> prep
   useEffect(() => {
-    if (stage === 'realtime' && realtimePhase === 'tts' && !isPlaying && realtimeTtsTriggeredRef.current === currentQuestion?.questionIndex) {
+    if (stage === 'realtime' && realtimePhase === 'tts' && !isPlaying && realtimeTtsStartedRef.current && realtimeTtsTriggeredRef.current === currentQuestion?.questionIndex) {
+      realtimeTtsStartedRef.current = false;
       setRealtimePhase('prep');
       setPrepCountdown(PREP_SECONDS);
     }
