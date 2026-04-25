@@ -1,0 +1,5 @@
+flowchart LR
+    A[React前端] -->|WebSocket/HTTP| B[Spring Boot后端]
+    B -->|HTTP| C[Python语音服务<br/>FastAPI]
+    C --> D[sherpa-onnx<br/>ASR模型]
+    C --> E[MeloTTS<br/>TTS模型]

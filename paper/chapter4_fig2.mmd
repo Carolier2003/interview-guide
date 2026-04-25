@@ -1,0 +1,31 @@
+flowchart TB
+    subgraph Controller层
+        A[InterviewController]
+    end
+    subgraph Service层
+        B[InterviewSessionService]
+        C[InterviewQueryService]
+        D[AnswerEvaluationService]
+        E[InterviewExportService]
+    end
+    subgraph 缓存层
+        F[(Redis)]
+    end
+    subgraph Persistence层
+        G[InterviewSessionRepository]
+        H[InterviewAnswerRepository]
+    end
+    subgraph 异步处理层
+        I[EvaluateStreamProducer]
+        J[EvaluateStreamConsumer]
+    end
+    subgraph 外部服务
+        K[DashScope LLM API]
+    end
+    A --> B & C & E
+    B --> F & G & H & I
+    C --> G & H
+    D --> H & K
+    E --> G & H
+    I --> J
+    J --> D

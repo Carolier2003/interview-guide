@@ -1,0 +1,25 @@
+flowchart TB
+    subgraph 表现层
+        A[Web浏览器]
+    end
+    subgraph 服务层
+        B[React前端应用<br/>Vite+Tailwind CSS]
+        C[Spring Boot后端服务<br/>RESTful API]
+        D[Python语音服务<br/>FastAPI]
+    end
+    subgraph 数据层
+        E[(PostgreSQL+pgvector)]
+        F[(Redis)]
+        G[S3兼容对象存储]
+    end
+    subgraph 外部服务
+        H[阿里云DashScope<br/>大语言模型API]
+    end
+    A <-->|HTTP| B
+    B <-->|Axios/HTTP| C
+    B <-->|WebSocket/HTTP| D
+    C <-->|JDBC| E
+    C <-->|Redisson| F
+    C <-->|S3 SDK| G
+    C <-->|HTTP| H
+    D --> C

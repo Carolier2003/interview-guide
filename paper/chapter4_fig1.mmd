@@ -1,0 +1,37 @@
+flowchart TB
+    subgraph Controller层
+        A[ResumeController]
+    end
+    subgraph Service层
+        B[ResumeUploadService]
+        C[ResumeParseService]
+        D[ResumeStorageService]
+        E[ResumeQueryService]
+        F[ResumeExportService]
+    end
+    subgraph Persistence层
+        G[ResumeRepository]
+        H[ResumeAnalysisRepository]
+    end
+    subgraph 异步处理层
+        I[AnalyzeStreamProducer]
+        J[AnalyzeStreamConsumer]
+        K[ResumeGradingService]
+    end
+    subgraph 外部服务
+        L[(PostgreSQL)]
+        M[(S3对象存储)]
+        N[(Redis Stream)]
+        O[DashScope LLM API]
+    end
+    A --> B & E & F
+    B --> C & D & G & I
+    E --> G & H
+    F --> H
+    G --> L
+    H --> L
+    D --> M
+    I --> N
+    J --> N
+    J --> K --> O
+    K --> H

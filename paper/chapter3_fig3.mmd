@@ -1,0 +1,110 @@
+erDiagram
+    RESUME ||--o| RESUME_ANALYSIS : "生成"
+    RESUME ||--o{ INTERVIEW_SESSION : "关联"
+    INTERVIEW_SESSION ||--o{ INTERVIEW_ANSWER : "包含"
+    RAG_CHAT_SESSION ||--o{ RAG_CHAT_MESSAGE : "包含"
+    RAG_CHAT_SESSION }o--o{ KNOWLEDGE_BASE : "关联"
+    
+    RESUME {
+        Long id PK
+        String fileHash UK
+        String originalFilename
+        Long fileSize
+        String contentType
+        String storageKey
+        String storageUrl
+        Text resumeText
+        LocalDateTime uploadedAt
+        LocalDateTime lastAccessedAt
+        Integer accessCount
+        String analyzeStatus
+        String analyzeError
+    }
+    
+    RESUME_ANALYSIS {
+        Long id PK
+        Long resume_id FK
+        Integer overallScore
+        Integer contentScore
+        Integer structureScore
+        Integer skillMatchScore
+        Integer expressionScore
+        Integer projectScore
+        Text summary
+        Text strengthsJson
+        Text suggestionsJson
+        LocalDateTime analyzedAt
+    }
+    
+    INTERVIEW_SESSION {
+        Long id PK
+        String sessionId UK
+        Long resume_id FK
+        Integer totalQuestions
+        Integer currentQuestionIndex
+        String status
+        Text questionsJson
+        Text referenceAnswersJson
+        Integer overallScore
+        Text overallFeedback
+        Text strengthsJson
+        Text improvementsJson
+        LocalDateTime createdAt
+        LocalDateTime completedAt
+        String evaluateStatus
+        String evaluateError
+    }
+    
+    INTERVIEW_ANSWER {
+        Long id PK
+        Long session_id FK
+        Integer questionIndex
+        Text question
+        String category
+        Text userAnswer
+        Integer score
+        Text feedback
+        Text referenceAnswer
+        Text keyPointsJson
+        LocalDateTime answeredAt
+    }
+    
+    KNOWLEDGE_BASE {
+        Long id PK
+        String fileHash UK
+        String name
+        String category
+        String originalFilename
+        Long fileSize
+        String contentType
+        String storageKey
+        String storageUrl
+        LocalDateTime uploadedAt
+        LocalDateTime lastAccessedAt
+        Integer accessCount
+        Integer questionCount
+        String vectorStatus
+        String vectorError
+        Integer chunkCount
+    }
+    
+    RAG_CHAT_SESSION {
+        Long id PK
+        String title
+        String status
+        LocalDateTime createdAt
+        LocalDateTime updatedAt
+        Integer messageCount
+        Boolean isPinned
+    }
+    
+    RAG_CHAT_MESSAGE {
+        Long id PK
+        Long session_id FK
+        String type
+        Text content
+        Integer messageOrder
+        LocalDateTime createdAt
+        LocalDateTime updatedAt
+        Boolean completed
+    }

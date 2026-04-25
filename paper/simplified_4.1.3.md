@@ -1,0 +1,9 @@
+4.1.3 异步AI分析流程
+
+简历上传完成后，系统调用LLM对简历文本进行多维度评分[1]。LLM推理通常耗时1-5秒，为避免阻塞主线程，采用Redis Stream异步队列实现解耦。
+
+生产端由AnalyzeStreamProducer将任务投递至Redis Stream，消息体包含resumeId、resumeText和retryCount（初始为0）。投递成功后前端轮询analyzeStatus获取进度。
+
+消费端AnalyzeStreamConsumer继承AbstractStreamConsumer，封装自动ACK、死信队列与异常重试。消费者解析消息后更新状态为PROCESSING，调用ResumeGradingService执行评分，结果存入resume_analyses表后状态置为COMPLETED。系统内置最多3次重试：网络超时或API异常时任务重新入队并递增retryCount；超过3次标记为FAILED并记录异常信息。相较于定时轮询，Redis Stream具备消息持久化、消费者组负载均衡等优势，更适配高并发场景。
+
+ResumeGradingService基于Spring AI的ChatClient与阿里云DashScope交互。Spring AI通过Chat、Embedding、Vector Store等能力的统一抽象实现跨模型可移植性。本模块利用ChatClient发送结构化Prompt并接收JSON评分结果，Prompt明确五个维度及分值：内容完整性（0-25）、结构清晰度（0-20）、技能匹配度（0-25）、表达专业性（0-15）、项目经验（0-15），同时要求输出简历摘要、优点与改进建议。评分结果经Jackson反序列化为ResumeAnalysisResult对象，解析失败则抛出业务异常由上层重试机制捕获。

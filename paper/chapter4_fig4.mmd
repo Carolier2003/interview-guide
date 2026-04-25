@@ -1,0 +1,30 @@
+flowchart TB
+    subgraph 前端
+        A[KnowledgeBaseManagePage]
+        B[KnowledgeBaseUploadPage]
+        C[KnowledgeBaseQueryPage]
+    end
+    subgraph Controller层
+        D[KnowledgeBaseController]
+    end
+    subgraph Service层
+        E[KnowledgeBaseUploadService]
+        F[KnowledgeBaseQueryService]
+        G[VectorStoreService]
+    end
+    subgraph 数据层
+        H[(PostgreSQL)]
+        I[(pgvector向量表)]
+        J[(S3对象存储)]
+    end
+    subgraph 外部AI服务
+        K[Embedding模型 API]
+        L[DashScope LLM API]
+    end
+    A --> D
+    B --> D
+    C --> D
+    D --> E & F
+    E --> G & H & J
+    F --> G & H & L
+    G --> I & K
