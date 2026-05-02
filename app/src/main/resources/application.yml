@@ -121,7 +121,7 @@ app:
   # 语音服务配置
   voice:
     service-url: ${VOICE_SERVICE_URL:http://localhost:8000}
-    asr-timeout: 30000
+    asr-timeout: 60000
     tts-timeout: 60000
 
   # CORS配置 - React前端

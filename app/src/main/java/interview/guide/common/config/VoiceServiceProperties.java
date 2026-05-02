@@ -13,6 +13,6 @@ import org.springframework.stereotype.Component;
 public class VoiceServiceProperties {
 
     private String serviceUrl = "http://localhost:8000";
-    private int asrTimeout = 30000;
-    private int ttsTimeout = 30000;
+    private int asrTimeout = 60000;
+    private int ttsTimeout = 60000;
 }

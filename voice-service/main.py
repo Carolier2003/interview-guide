@@ -1,3 +1,4 @@
+import asyncio
 import os
 import re
 import tempfile
@@ -11,6 +12,9 @@ from fastapi.responses import JSONResponse, Response
 from pydub import AudioSegment
 
 from config import settings
+
+# SiliconFlow API 重试次数
+SILICONFLOW_MAX_RETRIES = 2
 
 asr_recognizer = None
 tts_model = None
@@ -106,34 +110,44 @@ async def _asr_siliconflow(audio: UploadFile):
         tmp.write(content)
         tmp_path = tmp.name
 
+    last_error = None
     try:
-        async with httpx.AsyncClient() as client:
-            with open(tmp_path, "rb") as f:
-                files = {
-                    "file": (
-                        audio.filename or "audio.webm",
-                        f,
-                        audio.content_type or "application/octet-stream",
-                    )
-                }
-                data = {"model": settings.siliconflow_asr_model}
-                resp = await client.post(
-                    f"{settings.siliconflow_base_url}/audio/transcriptions",
-                    headers={"Authorization": f"Bearer {settings.siliconflow_api_key}"},
-                    files=files,
-                    data=data,
-                    timeout=60.0,
-                )
-                resp.raise_for_status()
-                result = resp.json()
+        for attempt in range(SILICONFLOW_MAX_RETRIES + 1):
+            try:
+                async with httpx.AsyncClient() as client:
+                    with open(tmp_path, "rb") as f:
+                        files = {
+                            "file": (
+                                audio.filename or "audio.webm",
+                                f,
+                                audio.content_type or "application/octet-stream",
+                            )
+                        }
+                        data = {"model": settings.siliconflow_asr_model}
+                        resp = await client.post(
+                            f"{settings.siliconflow_base_url}/audio/transcriptions",
+                            headers={"Authorization": f"Bearer {settings.siliconflow_api_key}"},
+                            files=files,
+                            data=data,
+                            timeout=90.0,
+                        )
+                        resp.raise_for_status()
+                        result = resp.json()
 
-        text = result.get("text", "")
-        return {"text": text}
-    except Exception as e:
-        print(f"SiliconFlow ASR failed: {e}")
+                text = result.get("text", "")
+                return {"text": text}
+            except Exception as e:
+                last_error = e
+                if attempt < SILICONFLOW_MAX_RETRIES:
+                    wait = 2 ** attempt
+                    print(f"SiliconFlow ASR attempt {attempt + 1} failed, retrying in {wait}s: {e}")
+                    await asyncio.sleep(wait)
+                else:
+                    print(f"SiliconFlow ASR failed after {SILICONFLOW_MAX_RETRIES + 1} attempts: {e}")
+
         return JSONResponse(
             status_code=500,
-            content={"error": f"ASR inference failed: {str(e)}"},
+            content={"error": f"ASR inference failed: {str(last_error)}"},
         )
     finally:
         if os.path.exists(tmp_path):
@@ -269,21 +283,35 @@ async def _tts_siliconflow(text: str, speaker_id: int = 0):
         "response_format": "mp3",
         "stream": False,
     }
-    try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(
-                f"{settings.siliconflow_base_url}/audio/speech",
-                headers=headers,
-                json=payload,
-                timeout=60.0,
-            )
-            resp.raise_for_status()
-            mp3_bytes = resp.content
-    except Exception as e:
-        print(f"SiliconFlow TTS request failed: {e}")
+
+    last_error = None
+    mp3_bytes = None
+    for attempt in range(SILICONFLOW_MAX_RETRIES + 1):
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(
+                    f"{settings.siliconflow_base_url}/audio/speech",
+                    headers=headers,
+                    json=payload,
+                    timeout=60.0,
+                )
+                resp.raise_for_status()
+                mp3_bytes = resp.content
+            break
+        except Exception as e:
+            last_error = e
+            if attempt < SILICONFLOW_MAX_RETRIES:
+                wait = 2 ** attempt
+                print(f"SiliconFlow TTS attempt {attempt + 1} failed, retrying in {wait}s: {e}")
+                import asyncio
+                await asyncio.sleep(wait)
+            else:
+                print(f"SiliconFlow TTS failed after {SILICONFLOW_MAX_RETRIES + 1} attempts: {e}")
+
+    if mp3_bytes is None:
         return JSONResponse(
             status_code=500,
-            content={"error": f"TTS inference failed: {str(e)}"},
+            content={"error": f"TTS inference failed: {str(last_error)}"},
         )
 
     # mp3 -> wav

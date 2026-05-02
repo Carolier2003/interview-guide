@@ -46,48 +46,69 @@ public class VoiceServiceClient {
     }
 
     /**
-     * 语音识别（ASR）
+     * 语音识别（ASR），失败自动重试最多 2 次
      *
      * @param audioFile 音频文件
      * @return 识别出的文本
      */
     public String transcribe(MultipartFile audioFile) {
-        try {
-            MultiValueMap<String, Object> parts = new LinkedMultiValueMap<>();
-            parts.add("audio", new MultipartFileResource(audioFile));
+        Exception lastError = null;
+        int maxRetries = 2;
 
-            ResponseEntity<Map> response = restClient(voiceProperties.getAsrTimeout())
-                    .post()
-                    .uri("/asr")
-                    .body(parts)
-                    .retrieve()
-                    .toEntity(Map.class);
+        for (int attempt = 0; attempt <= maxRetries; attempt++) {
+            try {
+                MultiValueMap<String, Object> parts = new LinkedMultiValueMap<>();
+                parts.add("audio", new MultipartFileResource(audioFile));
 
-            Map<String, Object> body = response.getBody();
-            if (body == null) {
-                throw new BusinessException(ErrorCode.VOICE_ASR_FAILED);
+                ResponseEntity<Map> response = restClient(voiceProperties.getAsrTimeout())
+                        .post()
+                        .uri("/asr")
+                        .body(parts)
+                        .retrieve()
+                        .toEntity(Map.class);
+
+                Map<String, Object> body = response.getBody();
+                if (body == null) {
+                    throw new BusinessException(ErrorCode.VOICE_ASR_FAILED);
+                }
+
+                if (body.containsKey("error")) {
+                    log.warn("ASR service returned error: {}", body.get("error"));
+                    throw new BusinessException(ErrorCode.VOICE_ASR_FAILED);
+                }
+
+                String text = (String) body.get("text");
+                if (text == null) {
+                    throw new BusinessException(ErrorCode.VOICE_ASR_FAILED);
+                }
+
+                return text;
+            } catch (ResourceAccessException e) {
+                lastError = e;
+                log.warn("ASR attempt {}/{} failed (resource access): {}", attempt + 1, maxRetries + 1, e.getMessage());
+            } catch (BusinessException e) {
+                lastError = e;
+                log.warn("ASR attempt {}/{} failed (business): {}", attempt + 1, maxRetries + 1, e.getMessage());
+            } catch (Exception e) {
+                lastError = e;
+                log.warn("ASR attempt {}/{} failed: {}", attempt + 1, maxRetries + 1, e.getMessage());
             }
 
-            if (body.containsKey("error")) {
-                log.warn("ASR service returned error: {}", body.get("error"));
-                throw new BusinessException(ErrorCode.VOICE_ASR_FAILED);
+            if (attempt < maxRetries) {
+                try {
+                    Thread.sleep((long) Math.pow(2, attempt) * 1000);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
             }
-
-            String text = (String) body.get("text");
-            if (text == null) {
-                throw new BusinessException(ErrorCode.VOICE_ASR_FAILED);
-            }
-
-            return text;
-        } catch (ResourceAccessException e) {
-            log.error("Voice service unavailable for ASR", e);
-            throw new BusinessException(ErrorCode.VOICE_SERVICE_UNAVAILABLE);
-        } catch (BusinessException e) {
-            throw e;
-        } catch (Exception e) {
-            log.error("ASR failed", e);
-            throw new BusinessException(ErrorCode.VOICE_ASR_FAILED);
         }
+
+        log.error("ASR failed after {} attempts", maxRetries + 1, lastError);
+        if (lastError instanceof ResourceAccessException) {
+            throw new BusinessException(ErrorCode.VOICE_SERVICE_UNAVAILABLE);
+        }
+        throw new BusinessException(ErrorCode.VOICE_ASR_FAILED);
     }
 
     /**

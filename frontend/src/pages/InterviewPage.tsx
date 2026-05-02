@@ -334,39 +334,49 @@ export default function Interview({ resumeText, resumeId, onBack, onInterviewCom
     }
   };
 
+  // 语音识别核心逻辑（auto-retry 最多3次），同时给 useEffect 和手动重试按钮复用
+  const handleTranscribeAudio = useCallback(async (blob: Blob) => {
+    if (!session) return;
+    setIsTranscribing(true);
+    setRealtimeError(null);
+    if (stage === 'realtime') {
+      setRealtimePhase('transcribing');
+    }
+    for (let attempt = 0; attempt <= 2; attempt++) {
+      try {
+        const text = await interviewApi.transcribeAudio(session.sessionId, blob);
+        if (stage === 'realtime') {
+          await handleSubmitAnswer(text.trim());
+        } else {
+          setAnswer(prev => (prev ? prev + ' ' + text : text));
+        }
+        setIsTranscribing(false);
+        resetRecorder();
+        return;
+      } catch (err) {
+        if (attempt < 2) {
+          await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+        } else {
+          const msg = err instanceof Error ? err.message : '语音识别失败';
+          if (stage === 'realtime') {
+            setRealtimeError(msg + '，可点击重试按钮再次识别');
+          } else {
+            setError(msg);
+            resetRecorder();
+          }
+        }
+      }
+    }
+    setIsTranscribing(false);
+  }, [session, stage, resetRecorder, handleSubmitAnswer]);
+
   // 语音识别：录音停止后自动上传
   useEffect(() => {
     if (audioBlob && session) {
-      const doTranscribe = async () => {
-        setIsTranscribing(true);
-        if (stage === 'realtime') {
-          setRealtimePhase('transcribing');
-        }
-        try {
-          const text = await interviewApi.transcribeAudio(session.sessionId, audioBlob);
-          if (stage === 'realtime') {
-            await handleSubmitAnswer(text.trim());
-          } else {
-            setAnswer(prev => (prev ? prev + ' ' + text : text));
-          }
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : '语音识别失败';
-          if (stage === 'realtime') {
-            setRealtimeError(msg + '，请重试或跳过本题');
-            setRealtimePhase('tts'); // 允许重试
-            realtimeTtsTriggeredRef.current = -1;
-          } else {
-            setError(msg);
-          }
-        } finally {
-          setIsTranscribing(false);
-          resetRecorder();
-        }
-      };
-      doTranscribe();
+      handleTranscribeAudio(audioBlob);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [audioBlob, session, resetRecorder]);
+  }, [audioBlob, session, handleTranscribeAudio]);
 
   // 聊天模式：自动播放新题目 TTS
   useEffect(() => {
@@ -606,7 +616,7 @@ export default function Interview({ resumeText, resumeId, onBack, onInterviewCom
         onPauseInterview={handlePauseInterview}
         onResumeInterview={handleResumeInterview}
         onExitInterview={handleExitInterview}
-        onRetry={handleResumeInterview}
+        onRetry={audioBlob ? () => handleTranscribeAudio(audioBlob) : undefined}
         isPaused={isPaused}
         error={realtimeError}
       />

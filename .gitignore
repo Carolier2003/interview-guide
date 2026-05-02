@@ -18,6 +18,10 @@ app/src/main/resources/application-dev.yml
 voice-service/.venv
 voice-service/__pycache__
 voice-service/models
+voice-service/MeloTTS-main/
+
+# Docker runtime data
+/data
 
 # Local design docs
 /design-system
