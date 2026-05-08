@@ -164,7 +164,7 @@
 
   .rbc-today {
     @apply bg-primary-50/80;
-    @apply dark:bg-primary-950/40;
+    @apply dark:bg-primary-950;
     @apply backdrop-blur-sm;
   }
 

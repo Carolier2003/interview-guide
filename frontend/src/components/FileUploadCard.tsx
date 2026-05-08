@@ -117,7 +117,7 @@ export default function FileUploadCard({
         <div
           className={`relative overflow-hidden rounded-3xl border-2 border-dashed transition-all duration-300 cursor-pointer
             ${dragOver
-              ? 'border-primary-400 bg-primary-50/30 dark:border-primary-500 dark:bg-primary-950/20 scale-[1.01]'
+              ? 'border-primary-400 bg-primary-50 dark:border-primary-500 dark:bg-primary-950 scale-[1.01]'
               : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:border-slate-300 dark:hover:border-slate-600'
             }
             ${selectedFile ? 'p-10 md:p-12' : 'p-12 md:p-16'}

@@ -516,7 +516,7 @@ function QuestionCard({
 
               {/* AI 深度评价 */}
               {answer.feedback && (
-                <div className="rounded-xl border-l-4 border-primary-400 bg-primary-50/40 dark:bg-primary-950/20 p-4 md:p-5">
+                <div className="rounded-xl border-l-4 border-primary-400 bg-primary-50 dark:bg-primary-950 p-4 md:p-5">
                   <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-primary-700 dark:text-primary-400">
                     <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M12 20h9" />
