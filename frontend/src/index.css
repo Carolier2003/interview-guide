@@ -18,6 +18,7 @@
   --color-primary-700: #0f766e;
   --color-primary-800: #115e59;
   --color-primary-900: #134e4a;
+  --color-primary-950: #042a2a;
 
   --font-display: 'Outfit', -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif;
   --font-sans: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif;
@@ -239,7 +240,7 @@
   }
 
   .dark .rbc-today {
-    @apply bg-primary-950/30;
+    @apply bg-primary-950;
   }
 
   .dark .rbc-month-row {
