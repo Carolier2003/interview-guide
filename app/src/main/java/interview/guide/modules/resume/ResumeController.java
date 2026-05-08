@@ -7,12 +7,18 @@ import interview.guide.modules.resume.model.ResumeListItemDTO;
 import interview.guide.modules.resume.service.ResumeDeleteService;
 import interview.guide.modules.resume.service.ResumeHistoryService;
 import interview.guide.modules.resume.service.ResumeUploadService;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.net.URLEncoder;
@@ -27,6 +33,7 @@ import java.util.Map;
 @Slf4j
 @RestController
 @RequiredArgsConstructor
+@Tag(name = "简历管理", description = "简历上传、分析、导出与删除")
 public class ResumeController {
 
     private final ResumeUploadService uploadService;
@@ -40,7 +47,8 @@ public class ResumeController {
      * @return 简历分析结果，包含评分和建议
      */
     @PostMapping(value = "/api/resumes/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @RateLimit(dimensions = {RateLimit.Dimension.GLOBAL, RateLimit.Dimension.IP}, count = 5)
+    @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 5)
+    @RateLimit(dimension = RateLimit.Dimension.IP, count = 5)
     public Result<Map<String, Object>> uploadAndAnalyze(@RequestParam("file") MultipartFile file) {
         Map<String, Object> result = uploadService.uploadAndAnalyze(file);
         boolean isDuplicate = (Boolean) result.get("duplicate");
@@ -107,7 +115,8 @@ public class ResumeController {
      * @return 结果
      */
     @PostMapping("/api/resumes/{id}/reanalyze")
-    @RateLimit(dimensions = {RateLimit.Dimension.GLOBAL, RateLimit.Dimension.IP}, count = 2)
+    @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 2)
+    @RateLimit(dimension = RateLimit.Dimension.IP, count = 2)
     public Result<Void> reanalyze(@PathVariable Long id) {
         uploadService.reanalyze(id);
         return Result.success(null);

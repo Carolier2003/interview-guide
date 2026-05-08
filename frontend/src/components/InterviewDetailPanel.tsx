@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { getScoreBadgeColor } from '../utils/score';
+import { getScoreColor } from '../utils/score';
 import type { InterviewDetail, AnswerItem } from '../api/history';
 
 interface InterviewDetailPanelProps {
@@ -438,7 +438,7 @@ function QuestionCard({
   isExpanded: boolean;
   onToggle: () => void;
 }) {
-  const scoreClasses = getScoreBadgeColor(answer.score, [80, 60]);
+  const scoreClasses = getScoreColor(answer.score, [80, 60]);
   const scoreLabel = answer.score >= 85 ? '卓越' : answer.score >= 70 ? '良好' : answer.score >= 60 ? '及格' : '需加强';
 
   return (

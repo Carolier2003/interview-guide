@@ -1,16 +1,19 @@
 package interview.guide.modules.knowledgebase.service;
 
+import interview.guide.common.ai.LlmProviderRegistry;
+import interview.guide.common.ai.PromptSecurityConstants;
 import interview.guide.common.exception.BusinessException;
 import interview.guide.common.exception.ErrorCode;
 import interview.guide.modules.knowledgebase.model.QueryRequest;
 import interview.guide.modules.knowledgebase.model.QueryResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.prompt.PromptTemplate;
 import org.springframework.ai.document.Document;
-import org.springframework.ai.openai.OpenAiChatOptions;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.io.Resource;
+import org.springframework.core.io.ResourceLoader;
 import org.springframework.stereotype.Service;
 import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
@@ -23,11 +26,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
-import java.util.regex.Pattern;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -38,12 +37,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
 @Service
 public class KnowledgeBaseQueryService {
     private static final String NO_RESULT_RESPONSE = "抱歉，在选定的知识库中未检索到相关信息。请换一个更具体的关键词或补充上下文后再试。";
-    // 仅匹配纯 ASCII 短标识符（如 "jvm" "redis" "spring"），不匹配含中文的问句
-    // 注意：\\p{L} 会匹配所有 Unicode 字母（含汉字），故改为 [a-zA-Z0-9] 避免误判
-    private static final Pattern SHORT_TOKEN_PATTERN = Pattern.compile("^[a-zA-Z0-9_.+-]{2,15}$");
     private static final int STREAM_PROBE_CHARS = 120;
+    private static final int MAX_REWRITE_HISTORY_CHAR = 200;
 
-    private final ChatClient chatClient;
+    private final LlmProviderRegistry llmProviderRegistry;
     private final KnowledgeBaseVectorService vectorService;
     private final KnowledgeBaseListService listService;
     private final KnowledgeBaseCountService countService;
@@ -57,42 +54,41 @@ public class KnowledgeBaseQueryService {
     private final int topkLong;
     private final double minScoreShort;
     private final double minScoreDefault;
-    private final String rewriteModel;
-    private final int rewriteTimeoutSeconds;
 
     public KnowledgeBaseQueryService(
-            ChatClient.Builder chatClientBuilder,
+            LlmProviderRegistry llmProviderRegistry,
             KnowledgeBaseVectorService vectorService,
             KnowledgeBaseListService listService,
             KnowledgeBaseCountService countService,
-            @Value("classpath:prompts/knowledgebase-query-system.st") Resource systemPromptResource,
-            @Value("classpath:prompts/knowledgebase-query-user.st") Resource userPromptResource,
-            @Value("classpath:prompts/knowledgebase-query-rewrite.st") Resource rewritePromptResource,
-            @Value("${app.ai.rag.rewrite.enabled:true}") boolean rewriteEnabled,
-            @Value("${app.ai.rag.search.short-query-length:4}") int shortQueryLength,
-            @Value("${app.ai.rag.search.topk-short:20}") int topkShort,
-            @Value("${app.ai.rag.search.topk-medium:12}") int topkMedium,
-            @Value("${app.ai.rag.search.topk-long:8}") int topkLong,
-            @Value("${app.ai.rag.search.min-score-short:0.18}") double minScoreShort,
-            @Value("${app.ai.rag.search.min-score-default:0.28}") double minScoreDefault,
-            @Value("${app.ai.rag.rewrite.model:qwen-turbo}") String rewriteModel,
-            @Value("${app.ai.rag.rewrite.timeout-seconds:8}") int rewriteTimeoutSeconds) throws IOException {
-        this.chatClient = chatClientBuilder.build();
+            KnowledgeBaseQueryProperties queryProperties,
+            ResourceLoader resourceLoader) throws IOException {
+        this.llmProviderRegistry = llmProviderRegistry;
         this.vectorService = vectorService;
         this.listService = listService;
         this.countService = countService;
-        this.systemPromptTemplate = new PromptTemplate(systemPromptResource.getContentAsString(StandardCharsets.UTF_8));
-        this.userPromptTemplate = new PromptTemplate(userPromptResource.getContentAsString(StandardCharsets.UTF_8));
-        this.rewritePromptTemplate = new PromptTemplate(rewritePromptResource.getContentAsString(StandardCharsets.UTF_8));
-        this.rewriteEnabled = rewriteEnabled;
-        this.shortQueryLength = shortQueryLength;
-        this.topkShort = topkShort;
-        this.topkMedium = topkMedium;
-        this.topkLong = topkLong;
-        this.minScoreShort = minScoreShort;
-        this.minScoreDefault = minScoreDefault;
-        this.rewriteModel = rewriteModel;
-        this.rewriteTimeoutSeconds = rewriteTimeoutSeconds;
+        this.systemPromptTemplate = new PromptTemplate(
+            resourceLoader.getResource(queryProperties.getSystemPromptPath())
+                .getContentAsString(StandardCharsets.UTF_8)
+        );
+        this.userPromptTemplate = new PromptTemplate(
+            resourceLoader.getResource(queryProperties.getUserPromptPath())
+                .getContentAsString(StandardCharsets.UTF_8)
+        );
+        this.rewritePromptTemplate = new PromptTemplate(
+            resourceLoader.getResource(queryProperties.getRewritePromptPath())
+                .getContentAsString(StandardCharsets.UTF_8)
+        );
+        this.rewriteEnabled = queryProperties.getRewrite().isEnabled();
+        this.shortQueryLength = queryProperties.getSearch().getShortQueryLength();
+        this.topkShort = queryProperties.getSearch().getTopkShort();
+        this.topkMedium = queryProperties.getSearch().getTopkMedium();
+        this.topkLong = queryProperties.getSearch().getTopkLong();
+        this.minScoreShort = queryProperties.getSearch().getMinScoreShort();
+        this.minScoreDefault = queryProperties.getSearch().getMinScoreDefault();
+    }
+
+    private ChatClient getChatClient() {
+        return llmProviderRegistry.getDefaultChatClient();
     }
 
     /**
@@ -119,31 +115,24 @@ public class KnowledgeBaseQueryService {
             return NO_RESULT_RESPONSE;
         }
 
-        // 1. 验证知识库是否存在并更新问题计数（合并数据库操作）
         countService.updateQuestionCounts(knowledgeBaseIds);
 
-        // 2. Query rewrite + 动态参数检索（RAG）
-        QueryContext queryContext = buildQueryContext(question);
+        QueryContext queryContext = buildQueryContext(question, List.of());
         List<Document> relevantDocs = retrieveRelevantDocs(queryContext, knowledgeBaseIds);
 
-        if (!hasEffectiveHit(question, relevantDocs)) {
+        if (!hasEffectiveHit(relevantDocs)) {
             return NO_RESULT_RESPONSE;
         }
 
-        // 3. 构建上下文（合并检索到的文档）
         String context = relevantDocs.stream()
                 .map(Document::getText)
                 .collect(Collectors.joining("\n\n---\n\n"));
 
-        log.debug("检索到 {} 个相关文档片段", relevantDocs.size());
-
-        // 4. 构建提示词
         String systemPrompt = buildSystemPrompt();
         String userPrompt = buildUserPrompt(context, question);
 
         try {
-            // 5. 调用AI生成回答
-            String answer = chatClient.prompt()
+            String answer = getChatClient().prompt()
                     .system(systemPrompt)
                     .user(userPrompt)
                     .call()
@@ -163,7 +152,8 @@ public class KnowledgeBaseQueryService {
      * 构建系统提示词
      */
     private String buildSystemPrompt() {
-        return systemPromptTemplate.render();
+        return systemPromptTemplate.render()
+            + PromptSecurityConstants.ANTI_INJECTION_INSTRUCTION;
     }
 
     /**
@@ -193,14 +183,27 @@ public class KnowledgeBaseQueryService {
     }
 
     /**
-     * 流式查询知识库（SSE）
+     * 流式查询知识库（SSE，无上下文）
      *
      * @param knowledgeBaseIds 知识库ID列表
      * @param question 用户问题
      * @return 流式响应
      */
     public Flux<String> answerQuestionStream(List<Long> knowledgeBaseIds, String question) {
-        log.info("收到知识库流式提问: kbIds={}, question={}", knowledgeBaseIds, question);
+        return answerQuestionStream(knowledgeBaseIds, question, List.of());
+    }
+
+    /**
+     * 流式查询知识库（SSE，支持多轮上下文）
+     *
+     * @param knowledgeBaseIds 知识库ID列表
+     * @param question 用户问题
+     * @param history 历史对话消息（可选）
+     * @return 流式响应
+     */
+    public Flux<String> answerQuestionStream(List<Long> knowledgeBaseIds, String question, List<Message> history) {
+        log.info("收到知识库流式提问: kbIds={}, question={}, historySize={}", knowledgeBaseIds, question,
+                history != null ? history.size() : 0);
         if (knowledgeBaseIds == null || knowledgeBaseIds.isEmpty() || normalizeQuestion(question).isBlank()) {
             return Flux.just(NO_RESULT_RESPONSE);
         }
@@ -210,10 +213,11 @@ public class KnowledgeBaseQueryService {
             countService.updateQuestionCounts(knowledgeBaseIds);
 
             // 2. Query rewrite + 动态参数检索
-            QueryContext queryContext = buildQueryContext(question);
+            List<Message> effectiveHistory = sanitizeHistory(history);
+            QueryContext queryContext = buildQueryContext(question, effectiveHistory);
             List<Document> relevantDocs = retrieveRelevantDocs(queryContext, knowledgeBaseIds);
 
-            if (!hasEffectiveHit(question, relevantDocs)) {
+            if (!hasEffectiveHit(relevantDocs)) {
                 return Flux.just(NO_RESULT_RESPONSE);
             }
 
@@ -228,9 +232,12 @@ public class KnowledgeBaseQueryService {
             String systemPrompt = buildSystemPrompt();
             String userPrompt = buildUserPrompt(context, question);
 
-            // 5. 流式调用 + 探测窗口归一化：既保留流式速度，又避免无信息长文
-            Flux<String> responseFlux = chatClient.prompt()
-                    .system(systemPrompt)
+            // 5. 流式调用（带历史上下文）+ 探测窗口归一化
+            var promptSpec = getChatClient().prompt().system(systemPrompt);
+            if (!effectiveHistory.isEmpty()) {
+                promptSpec = promptSpec.messages(effectiveHistory);
+            }
+            Flux<String> responseFlux = promptSpec
                     .user(userPrompt)
                     .stream()
                     .content();
@@ -249,9 +256,9 @@ public class KnowledgeBaseQueryService {
         }
     }
 
-    private QueryContext buildQueryContext(String originalQuestion) {
+    private QueryContext buildQueryContext(String originalQuestion, List<Message> history) {
         String normalizedQuestion = normalizeQuestion(originalQuestion);
-        String rewrittenQuestion = rewriteQuestion(normalizedQuestion);
+        String rewrittenQuestion = rewriteQuestion(normalizedQuestion, history);
         Set<String> candidates = new LinkedHashSet<>();
         candidates.add(rewrittenQuestion);
         candidates.add(normalizedQuestion);
@@ -260,10 +267,19 @@ public class KnowledgeBaseQueryService {
         return new QueryContext(normalizedQuestion, new ArrayList<>(candidates), searchParams);
     }
 
+    private List<Message> sanitizeHistory(List<Message> history) {
+        if (history == null || history.isEmpty()) {
+            return List.of();
+        }
+        return history;
+    }
+
+//       清洗
     private String normalizeQuestion(String question) {
         return question == null ? "" : question.trim();
     }
 
+//    向量检索
     private List<Document> retrieveRelevantDocs(QueryContext queryContext, List<Long> knowledgeBaseIds) {
         for (String candidateQuery : queryContext.candidateQueries()) {
             if (candidateQuery.isBlank()) {
@@ -276,7 +292,7 @@ public class KnowledgeBaseQueryService {
                 queryContext.searchParams().minScore()
             );
             log.info("检索候选 query='{}'，命中 {} 条", candidateQuery, docs.size());
-            if (hasEffectiveHit(candidateQuery, docs)) {
+            if (hasEffectiveHit(docs)) {
                 return docs;
             }
         }
@@ -294,39 +310,26 @@ public class KnowledgeBaseQueryService {
         return new SearchParams(topkLong, minScoreDefault);
     }
 
-    private String rewriteQuestion(String question) {
+//    改写
+    private String rewriteQuestion(String question, List<Message> history) {
         if (!rewriteEnabled || question.isBlank()) {
             return question;
         }
         try {
             Map<String, Object> variables = new HashMap<>();
             variables.put("question", question);
+            variables.put("history", formatHistoryForRewrite(history));
             String rewritePrompt = rewritePromptTemplate.render(variables);
-
-            // 用轻量模型做重写，比主力模型快 3-5 倍，重写任务不需要大模型
-            OpenAiChatOptions rewriteOptions = OpenAiChatOptions.builder()
-                .model(rewriteModel)  // 配置项: app.ai.rag.rewrite.model
-                .build();
-
-            // 加超时保护：若 REWRITE_TIMEOUT_SECONDS 内未返回，则回退到原问题
-            CompletableFuture<String> future = CompletableFuture.supplyAsync(() ->
-                chatClient.prompt()
-                    .user(rewritePrompt)
-                    .options(rewriteOptions)
-                    .call()
-                    .content()
-            );
-
-            String rewritten = future.get(rewriteTimeoutSeconds, TimeUnit.SECONDS);
+            String rewritten = getChatClient().prompt()
+                .user(rewritePrompt)
+                .call()
+                .content();
             if (rewritten == null || rewritten.isBlank()) {
                 return question;
             }
             String normalized = rewritten.trim();
-            log.info("Query rewrite: origin='{}', rewritten='{}'", question, normalized);
+            log.info("Query rewrite: origin='{}', rewritten='{}', historySize={}", question, normalized, history.size());
             return normalized;
-        } catch (TimeoutException e) {
-            log.warn("Query rewrite 超时（{}s），使用原问题继续检索: '{}'", rewriteTimeoutSeconds, question);
-            return question;
         } catch (Exception e) {
             log.warn("Query rewrite 失败，使用原问题继续检索: {}", e.getMessage());
             return question;
@@ -334,37 +337,31 @@ public class KnowledgeBaseQueryService {
     }
 
     /**
-     * 检索命中不等于可回答。
-     * 对短 token 场景增加一次命中确认，避免把弱相关片段交给模型后生成大段“信息不足说明”。
+     * 将历史消息格式化为重写 prompt 中的文本摘要。
+     * 每条消息格式：用户: xxx / 助手: xxx
      */
-    private boolean hasEffectiveHit(String question, List<Document> docs) {
-        if (docs == null || docs.isEmpty()) {
-            return false;
+    private String formatHistoryForRewrite(List<Message> history) {
+        if (history == null || history.isEmpty()) {
+            return "";
         }
-
-        String normalized = normalizeQuestion(question);
-        if (!isShortTokenQuery(normalized)) {
-            return true;
-        }
-
-        String loweredToken = normalized.toLowerCase();
-        for (Document doc : docs) {
-            String text = doc.getText();
-            if (text != null && text.toLowerCase().contains(loweredToken)) {
-                return true;
+        StringBuilder sb = new StringBuilder();
+        for (Message msg : history) {
+            if (msg instanceof UserMessage) {
+                sb.append("用户: ").append(msg.getText()).append("\n");
+            } else if (msg instanceof AssistantMessage) {
+                // 截断过长的助手回复，避免 rewrite prompt 过长
+                String text = msg.getText();
+                if (text.length() > MAX_REWRITE_HISTORY_CHAR) {
+                    text = text.substring(0, MAX_REWRITE_HISTORY_CHAR) + "...";
+                }
+                sb.append("助手: ").append(text).append("\n");
             }
         }
-
-        log.info("短 query 命中确认失败，视为无有效结果: question='{}', docs={}", normalized, docs.size());
-        return false;
+        return sb.toString().trim();
     }
 
-    private boolean isShortTokenQuery(String question) {
-        if (question == null) {
-            return false;
-        }
-        String compact = question.trim();
-        return SHORT_TOKEN_PATTERN.matcher(compact).matches();
+    private boolean hasEffectiveHit(List<Document> docs) {
+        return docs != null && !docs.isEmpty();
     }
 
     private String normalizeAnswer(String answer) {
@@ -452,4 +449,3 @@ public class KnowledgeBaseQueryService {
     private record QueryContext(String originalQuestion, List<String> candidateQueries, SearchParams searchParams) {
     }
 }
-

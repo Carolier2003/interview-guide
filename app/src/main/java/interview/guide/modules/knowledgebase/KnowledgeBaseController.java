@@ -12,12 +12,20 @@ import interview.guide.modules.knowledgebase.service.KnowledgeBaseListService;
 import interview.guide.modules.knowledgebase.service.KnowledgeBaseQueryService;
 import interview.guide.modules.knowledgebase.service.KnowledgeBaseUploadService;
 import jakarta.validation.Valid;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 import reactor.core.publisher.Flux;
 
@@ -32,6 +40,7 @@ import java.util.Map;
 @Slf4j
 @RestController
 @RequiredArgsConstructor
+@Tag(name = "知识库管理", description = "知识库上传、下载、查询、分类与向量化")
 public class KnowledgeBaseController {
 
     private final KnowledgeBaseUploadService uploadService;
@@ -82,7 +91,8 @@ public class KnowledgeBaseController {
      * 基于知识库回答问题（支持多知识库）
      */
     @PostMapping("/api/knowledgebase/query")
-    @RateLimit(dimensions = {RateLimit.Dimension.GLOBAL, RateLimit.Dimension.IP}, count = 10)
+    @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 10)
+    @RateLimit(dimension = RateLimit.Dimension.IP, count = 10)
     public Result<QueryResponse> queryKnowledgeBase(@Valid @RequestBody QueryRequest request) {
         return Result.success(queryService.queryKnowledgeBase(request));
     }
@@ -91,7 +101,8 @@ public class KnowledgeBaseController {
      * 基于知识库回答问题（流式SSE，支持多知识库）
      */
     @PostMapping(value = "/api/knowledgebase/query/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    @RateLimit(dimensions = {RateLimit.Dimension.GLOBAL, RateLimit.Dimension.IP}, count = 5)
+    @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 5)
+    @RateLimit(dimension = RateLimit.Dimension.IP, count = 5)
     public Flux<String> queryKnowledgeBaseStream(@Valid @RequestBody QueryRequest request) {
         log.debug("收到知识库流式查询请求: kbIds={}, question={}, 线程: {} (虚拟线程: {})",
             request.knowledgeBaseIds(), request.question(), Thread.currentThread(), Thread.currentThread().isVirtual());
@@ -139,7 +150,8 @@ public class KnowledgeBaseController {
      * 上传知识库文件
      */
     @PostMapping(value = "/api/knowledgebase/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @RateLimit(dimensions = {RateLimit.Dimension.GLOBAL, RateLimit.Dimension.IP}, count = 3)
+    @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 3)
+    @RateLimit(dimension = RateLimit.Dimension.IP, count = 3)
     public Result<Map<String, Object>> uploadKnowledgeBase(
             @RequestParam("file") MultipartFile file,
             @RequestParam(value = "name", required = false) String name,
@@ -195,7 +207,8 @@ public class KnowledgeBaseController {
      * 用于向量化失败后的重试
      */
     @PostMapping("/api/knowledgebase/{id}/revectorize")
-    @RateLimit(dimensions = {RateLimit.Dimension.GLOBAL, RateLimit.Dimension.IP}, count = 2)
+    @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 2)
+    @RateLimit(dimension = RateLimit.Dimension.IP, count = 2)
     public Result<Void> revectorize(@PathVariable Long id) {
         uploadService.revectorize(id);
         return Result.success(null);

@@ -2,21 +2,36 @@ package interview.guide.modules.interview;
 
 import interview.guide.common.annotation.RateLimit;
 import interview.guide.common.result.Result;
-import interview.guide.modules.interview.model.*;
+import interview.guide.modules.interview.model.CreateInterviewRequest;
+import interview.guide.modules.interview.model.InterviewDetailDTO;
+import interview.guide.modules.interview.model.InterviewReportDTO;
+import interview.guide.modules.interview.model.InterviewSessionDTO;
+import interview.guide.modules.interview.model.SessionListItemDTO;
+import interview.guide.modules.interview.model.SubmitAnswerRequest;
+import interview.guide.modules.interview.model.SubmitAnswerResponse;
 import interview.guide.modules.interview.service.InterviewHistoryService;
 import interview.guide.modules.interview.service.InterviewPersistenceService;
 import interview.guide.modules.interview.service.InterviewSessionService;
 import interview.guide.modules.interview.service.VoiceServiceClient;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -26,24 +41,37 @@ import java.util.Map;
 @Slf4j
 @RestController
 @RequiredArgsConstructor
+@Tag(name = "模拟面试", description = "面试会话创建、问答交互与报告生成")
 public class InterviewController {
-    
+
     private final InterviewSessionService sessionService;
     private final InterviewHistoryService historyService;
     private final InterviewPersistenceService persistenceService;
     private final VoiceServiceClient voiceServiceClient;
-    
+
+    /**
+     * 列出所有面试会话（用于面试记录页）
+     */
+    @GetMapping("/api/interview/sessions")
+    public Result<List<SessionListItemDTO>> listSessions() {
+        List<SessionListItemDTO> items = persistenceService.findAll().stream()
+            .map(SessionListItemDTO::from)
+            .toList();
+        return Result.success(items);
+    }
+
     /**
      * 创建面试会话
      */
     @PostMapping("/api/interview/sessions")
-    @RateLimit(dimensions = {RateLimit.Dimension.GLOBAL, RateLimit.Dimension.IP}, count = 5)
+    @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 5)
+    @RateLimit(dimension = RateLimit.Dimension.IP, count = 5)
     public Result<InterviewSessionDTO> createSession(@RequestBody CreateInterviewRequest request) {
         log.info("创建面试会话，题目数量: {}", request.questionCount());
         InterviewSessionDTO session = sessionService.createSession(request);
         return Result.success(session);
     }
-    
+
     /**
      * 获取会话信息
      */
@@ -52,7 +80,7 @@ public class InterviewController {
         InterviewSessionDTO session = sessionService.getSession(sessionId);
         return Result.success(session);
     }
-    
+
     /**
      * 获取当前问题
      */
@@ -60,12 +88,12 @@ public class InterviewController {
     public Result<Map<String, Object>> getCurrentQuestion(@PathVariable String sessionId) {
         return Result.success(sessionService.getCurrentQuestionResponse(sessionId));
     }
-    
+
     /**
      * 提交答案
      */
     @PostMapping("/api/interview/sessions/{sessionId}/answers")
-    @RateLimit(dimensions = {RateLimit.Dimension.GLOBAL}, count = 10)
+    @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 10)
     public Result<SubmitAnswerResponse> submitAnswer(
             @PathVariable String sessionId,
             @RequestBody Map<String, Object> body) {
@@ -76,7 +104,7 @@ public class InterviewController {
         SubmitAnswerResponse response = sessionService.submitAnswer(request);
         return Result.success(response);
     }
-    
+
     /**
      * 生成面试报告
      */
@@ -86,7 +114,7 @@ public class InterviewController {
         InterviewReportDTO report = sessionService.generateReport(sessionId);
         return Result.success(report);
     }
-    
+
     /**
      * 查找未完成的面试会话
      * GET /api/interview/sessions/unfinished/{resumeId}
@@ -95,7 +123,7 @@ public class InterviewController {
     public Result<InterviewSessionDTO> findUnfinishedSession(@PathVariable Long resumeId) {
         return Result.success(sessionService.findUnfinishedSessionOrThrow(resumeId));
     }
-    
+
     /**
      * 暂存答案（不进入下一题）
      */
@@ -110,7 +138,7 @@ public class InterviewController {
         sessionService.saveAnswer(request);
         return Result.success(null);
     }
-    
+
     /**
      * 提前交卷
      */
@@ -120,7 +148,7 @@ public class InterviewController {
         sessionService.completeInterview(sessionId);
         return Result.success(null);
     }
-    
+
     /**
      * 获取面试会话详情
      * GET /api/interview/sessions/{sessionId}/details
@@ -130,7 +158,7 @@ public class InterviewController {
         InterviewDetailDTO detail = historyService.getInterviewDetail(sessionId);
         return Result.success(detail);
     }
-    
+
     /**
      * 导出面试报告为PDF
      */
@@ -138,9 +166,9 @@ public class InterviewController {
     public ResponseEntity<byte[]> exportInterviewPdf(@PathVariable String sessionId) {
         try {
             byte[] pdfBytes = historyService.exportInterviewPdf(sessionId);
-            String filename = URLEncoder.encode("模拟面试报告_" + sessionId + ".pdf", 
+            String filename = URLEncoder.encode("模拟面试报告_" + sessionId + ".pdf",
                 StandardCharsets.UTF_8);
-            
+
             return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename*=UTF-8''" + filename)
                 .contentType(MediaType.APPLICATION_PDF)
@@ -150,7 +178,7 @@ public class InterviewController {
             return ResponseEntity.internalServerError().build();
         }
     }
-    
+
     /**
      * 删除面试会话
      */
@@ -162,7 +190,7 @@ public class InterviewController {
     }
 
     /**
-     * 语音识别（ASR）
+     * 语音识别（ASR）- 通过Python语音微服务
      */
     @PostMapping(value = "/api/interview/sessions/{sessionId}/asr", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public Result<String> transcribeAudio(
@@ -174,7 +202,7 @@ public class InterviewController {
     }
 
     /**
-     * 语音合成（TTS）
+     * 语音合成（TTS）- 通过Python语音微服务
      */
     @PostMapping(value = "/api/interview/sessions/{sessionId}/tts")
     public ResponseEntity<byte[]> synthesizeQuestion(
