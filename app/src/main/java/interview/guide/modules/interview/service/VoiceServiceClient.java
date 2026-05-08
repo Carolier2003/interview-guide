@@ -5,9 +5,12 @@ import interview.guide.common.exception.BusinessException;
 import interview.guide.common.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.core.io.InputStreamResource;
+import org.springframework.core.io.ByteArrayResource;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.http.client.SimpleClientHttpRequestFactory;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
@@ -16,6 +19,7 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.net.http.HttpClient;
 import java.time.Duration;
 import java.util.Map;
 
@@ -31,8 +35,11 @@ public class VoiceServiceClient {
     private final VoiceServiceProperties voiceProperties;
 
     private RestClient restClient(int readTimeoutMs) {
-        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
-        factory.setConnectTimeout(Duration.ofSeconds(5));
+        HttpClient httpClient = HttpClient.newBuilder()
+                .version(HttpClient.Version.HTTP_1_1)
+                .connectTimeout(Duration.ofSeconds(5))
+                .build();
+        JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(httpClient);
         factory.setReadTimeout(Duration.ofMillis(readTimeoutMs));
 
         return RestClient.builder()
@@ -57,8 +64,13 @@ public class VoiceServiceClient {
 
         for (int attempt = 0; attempt <= maxRetries; attempt++) {
             try {
+                ByteArrayResource resource = asResource(audioFile);
+                HttpHeaders partHeaders = new HttpHeaders();
+                partHeaders.setContentType(MediaType.APPLICATION_OCTET_STREAM);
+                HttpEntity<ByteArrayResource> part = new HttpEntity<>(resource, partHeaders);
+
                 MultiValueMap<String, Object> parts = new LinkedMultiValueMap<>();
-                parts.add("audio", new MultipartFileResource(audioFile));
+                parts.add("audio", part);
 
                 ResponseEntity<Map> response = restClient(voiceProperties.getAsrTimeout())
                         .post()
@@ -148,26 +160,14 @@ public class VoiceServiceClient {
     }
 
     /**
-     * MultipartFile 包装为 InputStreamResource，保留原始文件名
+     * MultipartFile 包装为 ByteArrayResource，保留原始文件名，避免 InputStreamResource 流耗尽问题
      */
-    private static class MultipartFileResource extends InputStreamResource {
-        private final String filename;
-        private final long contentLength;
-
-        MultipartFileResource(MultipartFile file) throws IOException {
-            super(file.getInputStream());
-            this.filename = file.getOriginalFilename() != null ? file.getOriginalFilename() : "audio.webm";
-            this.contentLength = file.getSize();
-        }
-
-        @Override
-        public String getFilename() {
-            return filename;
-        }
-
-        @Override
-        public long contentLength() {
-            return contentLength;
-        }
+    private static ByteArrayResource asResource(MultipartFile file) throws IOException {
+        return new ByteArrayResource(file.getBytes()) {
+            @Override
+            public String getFilename() {
+                return file.getOriginalFilename() != null ? file.getOriginalFilename() : "audio.webm";
+            }
+        };
     }
 }

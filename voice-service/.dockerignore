@@ -1,0 +1,8 @@
+.venv
+models
+MeloTTS-main
+__pycache__
+.env
+*.pyc
+.git
+.gitignore

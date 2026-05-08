@@ -3,6 +3,7 @@ uvicorn[standard]>=0.27.0
 python-multipart>=0.0.9
 pydantic>=2.6.0
 pydantic-settings>=2.1.0
+dashscope>=1.24.0
 sherpa-onnx>=1.9.0
 melotts @ git+https://github.com/myshell-ai/MeloTTS.git
 numpy>=1.24.0

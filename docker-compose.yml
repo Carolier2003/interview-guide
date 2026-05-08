@@ -159,9 +159,10 @@ services:
       - "8000:8000"
     environment:
       SERVICE_PORT: 8000
-      # 语音服务配置优先读取容器内 .env 文件（voice-service/.env）
-      # 如需本地模型，将 voice-service/.env 中 VOICE_PROVIDER 改为 local
-      VOICE_PROVIDER: siliconflow
+      ASR_PROVIDER: siliconflow
+      TTS_PROVIDER: aliyun
+      ALIYUN_API_KEY: ${ALIYUN_API_KEY:-}
+      SILICONFLOW_API_KEY: ${SILICONFLOW_API_KEY:-}
     healthcheck:
       test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:8000/health\")'"]
       interval: 10s

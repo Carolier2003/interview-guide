@@ -4,17 +4,21 @@ import re
 import tempfile
 import wave
 from contextlib import asynccontextmanager
+from typing import Optional
 
+import dashscope
 import httpx
 import numpy as np
+from dashscope.audio.asr import Recognition, RecognitionCallback, RecognitionResult
+from dashscope.audio.tts_v2 import SpeechSynthesizer
 from fastapi import FastAPI, File, UploadFile
 from fastapi.responses import JSONResponse, Response
 from pydub import AudioSegment
 
 from config import settings
 
-# SiliconFlow API 重试次数
-SILICONFLOW_MAX_RETRIES = 2
+# Cloud API 重试次数
+CLOUD_MAX_RETRIES = 2
 
 asr_recognizer = None
 tts_model = None
@@ -69,11 +73,12 @@ def _load_local_tts():
 async def lifespan(app: FastAPI):
     global asr_recognizer, tts_model
 
-    if settings.voice_provider == "local":
+    if settings.get_asr_provider() == "local":
         _load_local_asr()
+    if settings.get_tts_provider() == "local":
         _load_local_tts()
-    else:
-        print(f"Voice provider set to '{settings.voice_provider}', skipping local model loading")
+    if settings.get_asr_provider() != "local" or settings.get_tts_provider() != "local":
+        print(f"ASR provider='{settings.get_asr_provider()}', TTS provider='{settings.get_tts_provider()}'")
 
     yield
 
@@ -86,20 +91,23 @@ app = FastAPI(lifespan=lifespan)
 
 @app.get("/health")
 def health():
-    if settings.voice_provider == "local":
-        return {
-            "status": "ok",
-            "provider": "local",
-            "asr_loaded": asr_recognizer is not None,
-            "tts_loaded": tts_model is not None,
-        }
-    else:
-        return {
-            "status": "ok",
-            "provider": settings.voice_provider,
-            "asr_loaded": bool(settings.siliconflow_api_key),
-            "tts_loaded": bool(settings.siliconflow_api_key),
-        }
+    return {
+        "status": "ok",
+        "asr_provider": settings.get_asr_provider(),
+        "tts_provider": settings.get_tts_provider(),
+        "asr_loaded": (
+            asr_recognizer is not None if settings.get_asr_provider() == "local"
+            else bool(settings.siliconflow_api_key) if settings.get_asr_provider() == "siliconflow"
+            else bool(settings.aliyun_api_key) if settings.get_asr_provider() == "aliyun"
+            else False
+        ),
+        "tts_loaded": (
+            tts_model is not None if settings.get_tts_provider() == "local"
+            else bool(settings.aliyun_api_key) if settings.get_tts_provider() == "aliyun"
+            else bool(settings.siliconflow_api_key) if settings.get_tts_provider() == "siliconflow"
+            else False
+        ),
+    }
 
 
 async def _asr_siliconflow(audio: UploadFile):
@@ -112,7 +120,7 @@ async def _asr_siliconflow(audio: UploadFile):
 
     last_error = None
     try:
-        for attempt in range(SILICONFLOW_MAX_RETRIES + 1):
+        for attempt in range(CLOUD_MAX_RETRIES + 1):
             try:
                 async with httpx.AsyncClient() as client:
                     with open(tmp_path, "rb") as f:
@@ -138,12 +146,12 @@ async def _asr_siliconflow(audio: UploadFile):
                 return {"text": text}
             except Exception as e:
                 last_error = e
-                if attempt < SILICONFLOW_MAX_RETRIES:
+                if attempt < CLOUD_MAX_RETRIES:
                     wait = 2 ** attempt
                     print(f"SiliconFlow ASR attempt {attempt + 1} failed, retrying in {wait}s: {e}")
                     await asyncio.sleep(wait)
                 else:
-                    print(f"SiliconFlow ASR failed after {SILICONFLOW_MAX_RETRIES + 1} attempts: {e}")
+                    print(f"SiliconFlow ASR failed after {CLOUD_MAX_RETRIES + 1} attempts: {e}")
 
         return JSONResponse(
             status_code=500,
@@ -154,10 +162,123 @@ async def _asr_siliconflow(audio: UploadFile):
             os.unlink(tmp_path)
 
 
+
+
+# ---- Aliyun ASR ----
+
+class _AliyunASRCallback(RecognitionCallback):
+    def __init__(self):
+        self.sentences: list[str] = []
+        self.current_text = ""
+        self.error_msg: Optional[str] = None
+
+    def on_event(self, result: RecognitionResult) -> None:
+        sentence = result.get_sentence()
+        if 'text' in sentence:
+            self.current_text = sentence['text']
+            if RecognitionResult.is_sentence_end(sentence):
+                self.sentences.append(sentence['text'])
+
+    def on_complete(self) -> None:
+        pass
+
+    def on_error(self, message) -> None:
+        self.error_msg = getattr(message, 'message', str(message))
+
+
+def _run_asr_recognition(wav_path: str, api_key: str, model: str) -> str:
+    """Blocking: stream PCM data through Recognition WebSocket."""
+    dashscope.api_key = api_key
+
+    with wave.open(wav_path, 'rb') as wf:
+        pcm_data = wf.readframes(wf.getnframes())
+
+    callback = _AliyunASRCallback()
+    recognition = Recognition(
+        model=model,
+        format='pcm',
+        sample_rate=16000,
+        language_hints=['zh'],
+        callback=callback,
+    )
+
+    recognition.start()
+    try:
+        chunk_size = 3200
+        for i in range(0, len(pcm_data), chunk_size):
+            recognition.send_audio_frame(pcm_data[i:i + chunk_size])
+    finally:
+        recognition.stop()
+
+    if callback.error_msg:
+        raise Exception(f"ASR recognition failed: {callback.error_msg}")
+
+    text = ''.join(callback.sentences) if callback.sentences else callback.current_text
+    text = text.strip()
+    print(f"[ASR] result: {text!r}, sentences={callback.sentences}, current={callback.current_text!r}")
+    return text
+
+
+async def _asr_aliyun(audio: UploadFile):
+    suffix = os.path.splitext(audio.filename or ".webm")[1] or ".webm"
+    content = await audio.read()
+    print(f"[ASR] received: filename={audio.filename!r}, content_type={audio.content_type!r}, size={len(content)} bytes")
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        tmp.write(content)
+        tmp_path = tmp.name
+
+    tmp_wav_path = tmp_path + ".wav"
+    try:
+        seg = AudioSegment.from_file(tmp_path)
+        print(f"[ASR] audio: channels={seg.channels}, frame_rate={seg.frame_rate}, duration={len(seg)/1000:.1f}s")
+        seg = seg.set_frame_rate(16000).set_channels(1)
+        seg.export(tmp_wav_path, format="wav")
+    except Exception as e:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+        return JSONResponse(
+            status_code=400,
+            content={"error": f"Audio conversion failed: {str(e)}"},
+        )
+    finally:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+
+    last_error = None
+    try:
+        for attempt in range(CLOUD_MAX_RETRIES + 1):
+            try:
+                text = await asyncio.to_thread(
+                    _run_asr_recognition, tmp_wav_path,
+                    settings.aliyun_api_key, settings.aliyun_asr_model,
+                )
+                return {"text": text}
+            except Exception as e:
+                last_error = e
+                if attempt < CLOUD_MAX_RETRIES:
+                    wait = 2 ** attempt
+                    print(f"Aliyun ASR attempt {attempt + 1} failed, retrying in {wait}s: {e}")
+                    await asyncio.sleep(wait)
+                else:
+                    print(f"Aliyun ASR failed after {CLOUD_MAX_RETRIES + 1} attempts: {e}")
+
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"ASR inference failed: {str(last_error)}"},
+        )
+    finally:
+        if os.path.exists(tmp_wav_path):
+            os.unlink(tmp_wav_path)
+
+
 @app.post("/asr")
 async def asr(audio: UploadFile = File(...)):
-    if settings.voice_provider == "siliconflow":
+    if settings.get_asr_provider() == "siliconflow":
         return await _asr_siliconflow(audio)
+
+    if settings.get_asr_provider() == "aliyun":
+        return await _asr_aliyun(audio)
 
     if asr_recognizer is None:
         return JSONResponse(
@@ -286,7 +407,7 @@ async def _tts_siliconflow(text: str, speaker_id: int = 0):
 
     last_error = None
     mp3_bytes = None
-    for attempt in range(SILICONFLOW_MAX_RETRIES + 1):
+    for attempt in range(CLOUD_MAX_RETRIES + 1):
         try:
             async with httpx.AsyncClient() as client:
                 resp = await client.post(
@@ -300,13 +421,12 @@ async def _tts_siliconflow(text: str, speaker_id: int = 0):
             break
         except Exception as e:
             last_error = e
-            if attempt < SILICONFLOW_MAX_RETRIES:
+            if attempt < CLOUD_MAX_RETRIES:
                 wait = 2 ** attempt
                 print(f"SiliconFlow TTS attempt {attempt + 1} failed, retrying in {wait}s: {e}")
-                import asyncio
                 await asyncio.sleep(wait)
             else:
-                print(f"SiliconFlow TTS failed after {SILICONFLOW_MAX_RETRIES + 1} attempts: {e}")
+                print(f"SiliconFlow TTS failed after {CLOUD_MAX_RETRIES + 1} attempts: {e}")
 
     if mp3_bytes is None:
         return JSONResponse(
@@ -340,10 +460,75 @@ async def _tts_siliconflow(text: str, speaker_id: int = 0):
     return Response(content=audio_bytes, media_type="audio/wav")
 
 
+
+
+# ---- Aliyun TTS ----
+
+async def _tts_aliyun(text: str):
+    dashscope.api_key = settings.aliyun_api_key
+
+    last_error = None
+    mp3_bytes: Optional[bytes] = None
+    for attempt in range(CLOUD_MAX_RETRIES + 1):
+        try:
+            synthesizer = SpeechSynthesizer(
+                model=settings.aliyun_tts_model,
+                voice=settings.aliyun_tts_voice,
+            )
+            result = synthesizer.call(text)
+            if synthesizer.get_last_request_id():
+                mp3_bytes = result
+                break
+            else:
+                raise Exception(f"TTS call returned error: {result}")
+        except Exception as e:
+            last_error = e
+            if attempt < CLOUD_MAX_RETRIES:
+                wait = 2 ** attempt
+                print(f"Aliyun TTS attempt {attempt + 1} failed, retrying in {wait}s: {e}")
+                await asyncio.sleep(wait)
+            else:
+                print(f"Aliyun TTS failed after {CLOUD_MAX_RETRIES + 1} attempts: {e}")
+
+    if mp3_bytes is None:
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"TTS inference failed: {str(last_error)}"},
+        )
+
+    # mp3 -> wav
+    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
+        tmp.write(mp3_bytes)
+        mp3_path = tmp.name
+
+    wav_path = mp3_path + ".wav"
+    try:
+        seg = AudioSegment.from_mp3(mp3_path)
+        seg.export(wav_path, format="wav")
+        with open(wav_path, "rb") as f:
+            audio_bytes = f.read()
+    except Exception as e:
+        print(f"Aliyun TTS audio conversion failed: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"TTS audio conversion failed: {str(e)}"},
+        )
+    finally:
+        if os.path.exists(mp3_path):
+            os.unlink(mp3_path)
+        if os.path.exists(wav_path):
+            os.unlink(wav_path)
+
+    return Response(content=audio_bytes, media_type="audio/wav")
+
+
 @app.post("/tts")
 async def tts(text: str, speaker_id: int = 0):
-    if settings.voice_provider == "siliconflow":
+    if settings.get_tts_provider() == "siliconflow":
         return await _tts_siliconflow(text, speaker_id)
+
+    if settings.get_tts_provider() == "aliyun":
+        return await _tts_aliyun(text)
 
     if tts_model is None:
         return JSONResponse(

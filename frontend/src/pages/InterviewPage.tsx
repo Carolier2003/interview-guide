@@ -57,6 +57,7 @@ export default function Interview({ resumeText, resumeId, onBack, onInterviewCom
   const recordingTimerRef = useRef<number | null>(null);
   const realtimeTtsTriggeredRef = useRef<number>(-1);
   const realtimeTtsStartedRef = useRef<boolean>(false);
+  const asrProcessingRef = useRef<boolean>(false);
 
   const {
     isRecording,
@@ -370,10 +371,13 @@ export default function Interview({ resumeText, resumeId, onBack, onInterviewCom
     setIsTranscribing(false);
   }, [session, stage, resetRecorder, handleSubmitAnswer]);
 
-  // 语音识别：录音停止后自动上传
+  // 语音识别：录音停止后自动上传（防重复触发）
   useEffect(() => {
-    if (audioBlob && session) {
-      handleTranscribeAudio(audioBlob);
+    if (audioBlob && session && !asrProcessingRef.current) {
+      asrProcessingRef.current = true;
+      handleTranscribeAudio(audioBlob).finally(() => {
+        asrProcessingRef.current = false;
+      });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [audioBlob, session, handleTranscribeAudio]);
