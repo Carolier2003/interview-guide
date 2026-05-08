@@ -10,12 +10,12 @@ WORKDIR /app
 # 避免每次构建都重新下载 npm 包，显著加快构建速度。
 COPY package.json package-lock.json ./
 
-# 2. 安装依赖（Docker 内使用 npm，避免 pnpm v10 的 .bin 解析问题）
+# 2. 安装依赖（使用 npm，无需全局 pnpm）
 RUN npm install
 
 # 3. 复制源代码并构建
 COPY . .
-# 执行构建命令 (vite build)，生成的静态文件会存放在 /app/dist 目录
+# 执行构建命令 (tsc && vite build)，生成的静态文件会存放在 /app/dist 目录
 RUN npm run build
 
 # ==============================================================================

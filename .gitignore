@@ -8,11 +8,17 @@ build
 /app/bin
 # Environment variables
 .env
+test-output.txt
 # IDEA code analysis
 qodana.yaml
 
 app/src/main/resources/application-dev.yml
 /docs
+SETUP_API_KEYS.md
+
+# AI Assistant documentation
+CLAUDE.md
+GEMINI.md
 
 # Python voice service
 voice-service/.venv
@@ -25,3 +31,6 @@ voice-service/MeloTTS-main/
 
 # Local design docs
 /design-system
+
+# Playwright MCP
+.playwright-mcp/

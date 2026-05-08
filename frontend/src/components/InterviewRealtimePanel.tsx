@@ -122,7 +122,7 @@ export default function InterviewRealtimePanel({
                 exit={reducedMotion ? { opacity: 0 } : { opacity: 0, y: -10 }}
                 className="flex flex-col items-center gap-4"
               >
-                <div className="flex items-center gap-3 rounded-full border border-primary-200 bg-primary-50 px-5 py-2.5 text-primary-700 dark:border-primary-900/50 dark:bg-primary-950/30 dark:text-primary-400">
+                <div className="flex items-center gap-3 rounded-full border border-primary-200 bg-primary-50 px-5 py-2.5 text-primary-700 dark:border-primary-900 dark:bg-primary-950 dark:text-primary-400">
                   {!reducedMotion && (
                     <motion.span
                       className="relative flex h-3 w-3"

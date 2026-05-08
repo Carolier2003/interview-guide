@@ -128,7 +128,7 @@ public class KnowledgeBaseListService {
     @Transactional
     public void updateCategory(Long id, String category) {
         KnowledgeBaseEntity entity = knowledgeBaseRepository.findById(id)
-            .orElseThrow(() -> new RuntimeException("知识库不存在"));
+            .orElseThrow(() -> new BusinessException(ErrorCode.KNOWLEDGE_BASE_NOT_FOUND, "知识库不存在"));
         entity.setCategory(category != null && !category.isBlank() ? category : null);
         knowledgeBaseRepository.save(entity);
         log.info("更新知识库分类: id={}, category={}", id, category);
@@ -247,4 +247,3 @@ public class KnowledgeBaseListService {
         return content;
     }
 }
-
