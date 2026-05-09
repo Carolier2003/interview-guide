@@ -126,7 +126,23 @@ public class InterviewQuestionService {
             List<HistoricalQuestion> historicalQuestions,
             List<CategoryDTO> customCategories,
             String jdText) {
+        return generateQuestionsBySkill(llmProvider, skillId, difficulty, resumeText,
+            questionCount, historicalQuestions, customCategories, jdText,
+            QuestionGenerationProgress.NOOP);
+    }
 
+    public List<InterviewQuestionDTO> generateQuestionsBySkill(
+            String llmProvider,
+            String skillId,
+            String difficulty,
+            String resumeText,
+            int questionCount,
+            List<HistoricalQuestion> historicalQuestions,
+            List<CategoryDTO> customCategories,
+            String jdText,
+            QuestionGenerationProgress progress) {
+
+        QuestionGenerationProgress safeProgress = progress != null ? progress : QuestionGenerationProgress.NOOP;
         SkillDTO skill = resolveSkill(skillId, customCategories, jdText);
         String difficultyDesc = resolveDifficulty(difficulty);
         ChatClient questionChatClient =
@@ -135,8 +151,13 @@ public class InterviewQuestionService {
         boolean hasResume = resumeText != null && !resumeText.isBlank();
         String historicalSection = buildHistoricalSection(historicalQuestions);
         if (!hasResume) {
-            return generateDirectionOnly(questionChatClient, skill, difficultyDesc, questionCount,
-                historicalSection);
+            safeProgress.accept(new QuestionGenerationProgress.Event(
+                "generating_direction", 20, "AI 正在生成方向题..."));
+            List<InterviewQuestionDTO> directionOnly = generateDirectionOnly(
+                questionChatClient, skill, difficultyDesc, questionCount, historicalSection);
+            safeProgress.accept(new QuestionGenerationProgress.Event(
+                "direction_done", 80, "方向题生成完成"));
+            return directionOnly;
         }
 
         int resumeCount = Math.max(1, (int) Math.round(questionCount * RESUME_QUESTION_RATIO));
@@ -145,11 +166,15 @@ public class InterviewQuestionService {
         log.info("并行出题: skill={}, total={}, resumeCount={}, directionCount={}",
             skillId, questionCount, resumeCount, directionCount);
 
+        safeProgress.accept(new QuestionGenerationProgress.Event(
+            "generating_resume", 20, "AI 正在结合简历生成针对性问题..."));
         CompletableFuture<List<InterviewQuestionDTO>> resumeFuture = CompletableFuture.supplyAsync(
             () -> generateResumeQuestions(questionChatClient, resumeText, resumeCount, skill,
                 difficultyDesc, historicalSection),
             questionExecutor);
 
+        safeProgress.accept(new QuestionGenerationProgress.Event(
+            "generating_direction", 30, "AI 同时在生成方向题..."));
         CompletableFuture<List<InterviewQuestionDTO>> directionFuture = CompletableFuture.supplyAsync(
             () -> generateDirectionOnly(questionChatClient, skill, difficultyDesc, directionCount,
                 historicalSection),
@@ -159,6 +184,8 @@ public class InterviewQuestionService {
         List<InterviewQuestionDTO> directionQuestions;
         try {
             resumeQuestions = resumeFuture.join();
+            safeProgress.accept(new QuestionGenerationProgress.Event(
+                "resume_done", 60, "简历题生成完成,方向题进行中..."));
         } catch (CompletionException e) {
             log.error("简历题生成失败，降级为全方向题", e.getCause());
             directionFuture.cancel(true);
@@ -168,6 +195,8 @@ public class InterviewQuestionService {
 
         try {
             directionQuestions = directionFuture.join();
+            safeProgress.accept(new QuestionGenerationProgress.Event(
+                "direction_done", 80, "方向题生成完成"));
         } catch (CompletionException e) {
             log.error("方向题生成失败，降级为全简历题", e.getCause());
             if (resumeQuestions.isEmpty()) {

@@ -1,28 +1,56 @@
 /* ScheduleCalendar.css - Custom styles for the interview calendar */
 
-/* Increase time slot height in week and day views */
+/* ---------- Time view (week / day) ---------- */
+
+/* Increase time slot group height so events have more breathing room */
 .rbc-time-view .rbc-time-content .rbc-timeslot-group {
   min-height: 60px !important;
 }
 
-/* Ensure events have minimum height */
-.rbc-event {
+/* Time slot height: step=30min, timeslots=2 → each half-hour = 2 × 40px = 80px */
+.rbc-time-view .rbc-time-slot {
+  height: 40px !important;
+}
+
+/* Override default overflow:hidden on the event wrapper so content isn't clipped */
+.rbc-time-view .rbc-event {
   min-height: 50px !important;
+  overflow: visible !important;
 }
 
-/* Month view events don't need minimum height */
-.rbc-month-view .rbc-event {
-  min-height: auto !important;
-}
-
-/* Allow event content to overflow for better text display */
+/* Allow the inner content element to overflow as well */
 .rbc-time-view .rbc-event-content {
   overflow: visible !important;
 }
 
-/* Set time slot height */
-.rbc-time-view .rbc-time-slot {
-  height: 30px !important;
+/* Ensure time content container scrolls instead of clipping */
+.rbc-time-content {
+  overflow-y: auto !important;
+}
+
+/* ---------- Month view ---------- */
+
+/* Override default overflow:hidden on month-view events */
+.rbc-month-view .rbc-event {
+  overflow: visible !important;
+  min-height: auto !important;
+}
+
+.rbc-month-view .rbc-event-content {
+  overflow: visible !important;
+}
+
+/* Give month rows more height per week */
+.rbc-month-row {
+  min-height: 120px !important;
+}
+
+/* ---------- Shared ---------- */
+
+/* Improve event label readability */
+.rbc-event-label {
+  font-size: 11px !important;
+  font-weight: 500 !important;
 }
 
 /* Style time slot borders for light mode */
@@ -33,22 +61,6 @@
 /* Style time slot borders for dark mode */
 .dark .rbc-day-slot .rbc-time-slot {
   border-top: 1px solid rgba(71, 85, 105, 0.3) !important;
-}
-
-/* Improve event label readability */
-.rbc-event-label {
-  font-size: 11px !important;
-  font-weight: 500 !important;
-}
-
-/* Ensure events can expand to show content */
-.rbc-time-content {
-  overflow-y: auto !important;
-}
-
-/* Better spacing for month view */
-.rbc-month-row {
-  min-height: 100px !important;
 }
 
 /* Improve calendar header styling */

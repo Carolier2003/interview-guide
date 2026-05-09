@@ -53,6 +53,16 @@ public class InterviewSessionService {
      * 前端应该先调用 findUnfinishedSession 检查，或者使用 forceCreate 参数强制创建
      */
     public InterviewSessionDTO createSession(CreateInterviewRequest request) {
+        return createSession(request, QuestionGenerationProgress.NOOP);
+    }
+
+    /**
+     * 创建面试会话并通过 progress 回调推送阶段进度（供 SSE 端点使用）
+     */
+    public InterviewSessionDTO createSession(CreateInterviewRequest request,
+                                             QuestionGenerationProgress progress) {
+        QuestionGenerationProgress safeProgress = progress != null ? progress : QuestionGenerationProgress.NOOP;
+
         // 如果指定了resumeId且未强制创建，检查是否有未完成的会话
         if (request.resumeId() != null && !Boolean.TRUE.equals(request.forceCreate())) {
             Optional<InterviewSessionDTO> unfinishedOpt = findUnfinishedSession(request.resumeId());
@@ -62,6 +72,9 @@ public class InterviewSessionService {
                 return unfinishedOpt.get();
             }
         }
+
+        safeProgress.accept(new QuestionGenerationProgress.Event(
+            "preparing", 5, "正在准备出题环境..."));
 
         String sessionId = UUID.randomUUID().toString().replace("-", "").substring(0, 16);
         String skillId = request.skillId() != null ? request.skillId() : InterviewDefaults.SKILL_ID;
@@ -83,8 +96,12 @@ public class InterviewSessionService {
             request.questionCount(),
             historicalQuestions,
             request.customCategories(),
-            request.jdText()
+            request.jdText(),
+            safeProgress
         );
+
+        safeProgress.accept(new QuestionGenerationProgress.Event(
+            "finalizing", 90, "整合题目并保存会话..."));
 
         // 保存到 Redis 缓存
         sessionCache.saveSession(

@@ -1,6 +1,7 @@
 package interview.guide.modules.interview;
 
 import interview.guide.common.annotation.RateLimit;
+import interview.guide.common.exception.BusinessException;
 import interview.guide.common.result.Result;
 import interview.guide.modules.interview.model.CreateInterviewRequest;
 import interview.guide.modules.interview.model.InterviewDetailDTO;
@@ -12,6 +13,7 @@ import interview.guide.modules.interview.model.SubmitAnswerResponse;
 import interview.guide.modules.interview.service.InterviewHistoryService;
 import interview.guide.modules.interview.service.InterviewPersistenceService;
 import interview.guide.modules.interview.service.InterviewSessionService;
+import interview.guide.modules.interview.service.QuestionGenerationProgress;
 import interview.guide.modules.interview.service.VoiceServiceClient;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -19,6 +21,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -28,6 +31,9 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.FluxSink;
+import tools.jackson.databind.ObjectMapper;
 
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -48,6 +54,7 @@ public class InterviewController {
     private final InterviewHistoryService historyService;
     private final InterviewPersistenceService persistenceService;
     private final VoiceServiceClient voiceServiceClient;
+    private final ObjectMapper objectMapper;
 
     /**
      * 列出所有面试会话（用于面试记录页）
@@ -70,6 +77,63 @@ public class InterviewController {
         log.info("创建面试会话，题目数量: {}", request.questionCount());
         InterviewSessionDTO session = sessionService.createSession(request);
         return Result.success(session);
+    }
+
+    /**
+     * 创建面试会话（SSE 流式，推送阶段进度 + 最终 session）
+     * 事件:
+     *   event: progress  data: {"phase":"preparing","percent":5,"message":"..."}
+     *   event: session   data: <InterviewSessionDTO json>
+     *   event: error     data: {"code":xxx,"message":"..."}
+     */
+    @PostMapping(value = "/api/interview/sessions/stream",
+                 produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    @RateLimit(dimension = RateLimit.Dimension.GLOBAL, count = 5)
+    @RateLimit(dimension = RateLimit.Dimension.IP, count = 5)
+    public Flux<ServerSentEvent<String>> createSessionStream(@RequestBody CreateInterviewRequest request) {
+        log.info("创建面试会话(SSE)，题目数量: {}", request.questionCount());
+
+        return Flux.<ServerSentEvent<String>>create(sink ->
+            Thread.ofVirtual().name("interview-create-sse").start(() -> {
+                try {
+                    QuestionGenerationProgress progress = event -> sink.next(
+                        ServerSentEvent.<String>builder()
+                            .event("progress")
+                            .data(toJson(event))
+                            .build());
+
+                    InterviewSessionDTO session = sessionService.createSession(request, progress);
+
+                    sink.next(ServerSentEvent.<String>builder()
+                        .event("session")
+                        .data(toJson(session))
+                        .build());
+                    sink.complete();
+                } catch (BusinessException e) {
+                    log.warn("面试会话创建失败(业务异常): {}", e.getMessage());
+                    sink.next(ServerSentEvent.<String>builder()
+                        .event("error")
+                        .data(toJson(Map.of("code", e.getCode(), "message", e.getMessage())))
+                        .build());
+                    sink.complete();
+                } catch (Exception e) {
+                    log.error("面试会话创建失败", e);
+                    sink.next(ServerSentEvent.<String>builder()
+                        .event("error")
+                        .data(toJson(Map.of("code", 500, "message", "创建面试失败,请重试")))
+                        .build());
+                    sink.complete();
+                }
+            }), FluxSink.OverflowStrategy.BUFFER);
+    }
+
+    private String toJson(Object value) {
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (Exception e) {
+            log.error("SSE 事件序列化失败", e);
+            return "{}";
+        }
     }
 
     /**

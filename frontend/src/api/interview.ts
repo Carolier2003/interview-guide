@@ -8,6 +8,20 @@ import type {
   SubmitAnswerResponse
 } from '../types/interview';
 
+const SSE_BASE_URL = import.meta.env.PROD ? '' : 'http://localhost:8080';
+
+export interface CreateSessionProgressEvent {
+  phase: string;
+  percent: number;
+  message: string;
+}
+
+export interface CreateSessionStreamCallbacks {
+  onProgress: (event: CreateSessionProgressEvent) => void;
+  onSession: (session: InterviewSession) => void;
+  onError: (error: Error) => void;
+}
+
 export interface TextSessionMeta {
   sessionId: string;
   skillId: string;
@@ -37,6 +51,111 @@ export const interviewApi = {
     return request.post<InterviewSession>('/api/interview/sessions', req, {
       timeout: 180000, // 3分钟超时，AI生成问题需要时间
     });
+  },
+
+  /**
+   * 创建面试会话（SSE 流式 + 进度推送）
+   */
+  async createSessionStream(
+    req: CreateInterviewRequest,
+    callbacks: CreateSessionStreamCallbacks,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    let response: Response;
+    try {
+      response = await fetch(`${SSE_BASE_URL}/api/interview/sessions/stream`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'text/event-stream',
+        },
+        body: JSON.stringify(req),
+        signal,
+      });
+    } catch (e) {
+      callbacks.onError(e instanceof Error ? e : new Error(String(e)));
+      return;
+    }
+
+    if (!response.ok) {
+      let message = `请求失败 (${response.status})`;
+      try {
+        const data = await response.json();
+        if (data && typeof data === 'object' && 'message' in data && data.message) {
+          message = String(data.message);
+        }
+      } catch {
+        // ignore parse error
+      }
+      callbacks.onError(new Error(message));
+      return;
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) {
+      callbacks.onError(new Error('无法获取响应流'));
+      return;
+    }
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    const dispatchEvent = (eventType: string, data: string) => {
+      const trimmed = data.trim();
+      if (!trimmed) return;
+      try {
+        if (eventType === 'progress') {
+          callbacks.onProgress(JSON.parse(trimmed) as CreateSessionProgressEvent);
+        } else if (eventType === 'session') {
+          callbacks.onSession(JSON.parse(trimmed) as InterviewSession);
+        } else if (eventType === 'error') {
+          const errBody = JSON.parse(trimmed) as { code?: number; message?: string };
+          callbacks.onError(new Error(errBody.message || '创建面试失败'));
+        }
+      } catch (parseErr) {
+        callbacks.onError(parseErr instanceof Error ? parseErr : new Error(String(parseErr)));
+      }
+    };
+
+    const processBlock = (block: string) => {
+      let eventType = 'message';
+      const dataLines: string[] = [];
+      for (const rawLine of block.split('\n')) {
+        const line = rawLine.replace(/\r$/, '');
+        if (!line) continue;
+        if (line.startsWith(':')) continue; // SSE comment
+        if (line.startsWith('event:')) {
+          eventType = line.slice(6).trim();
+        } else if (line.startsWith('data:')) {
+          dataLines.push(line.slice(5).replace(/^ /, ''));
+        }
+      }
+      if (dataLines.length > 0) {
+        dispatchEvent(eventType, dataLines.join('\n'));
+      }
+    };
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          if (buffer.trim()) {
+            processBlock(buffer);
+          }
+          break;
+        }
+        buffer += decoder.decode(value, { stream: true });
+
+        let sepIndex: number;
+        while ((sepIndex = buffer.indexOf('\n\n')) !== -1) {
+          const block = buffer.slice(0, sepIndex);
+          buffer = buffer.slice(sepIndex + 2);
+          processBlock(block);
+        }
+      }
+    } catch (e) {
+      callbacks.onError(e instanceof Error ? e : new Error(String(e)));
+    }
   },
 
   /**

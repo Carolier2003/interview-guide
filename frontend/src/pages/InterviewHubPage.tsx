@@ -131,7 +131,7 @@ export default function InterviewHubPage() {
   };
 
   return (
-    <div className="max-w-5xl mx-auto">
+    <div className="max-w-7xl mx-auto">
       {/* 页面标题 */}
       <div className="mb-8">
         <h1 className="text-2xl font-bold text-slate-800 dark:text-white flex items-center gap-3">
